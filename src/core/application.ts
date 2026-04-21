@@ -35,6 +35,9 @@ export class VelocityApplication {
   // Scoped DI: per-controller child containers
   private controllerContainers = new Map<any, Container>();
 
+  // Track controller class → mounted path for resolveControllerPath
+  private controllerPaths = new Map<any, string>();
+
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
     this.config = new Config(config);
@@ -133,14 +136,18 @@ export class VelocityApplication {
     const container = this.controllerContainers.get(controllerClass) || this.container;
     const controller = container.resolve(controllerClass);
 
-    // Clone route metadata so per-registration middleware doesn't leak across mounts
+    // Deep-clone route metadata so per-registration middleware doesn't leak across mounts
     const routesMetadata: RouteMetadata[] = (Reflect.getMetadata(ROUTES_METADATA_KEY, controllerClass) || [])
-      .map((r: RouteMetadata) => ({ ...r }));
+      .map((r: RouteMetadata) => ({
+        ...r,
+        middlewares: r.middlewares ? [...r.middlewares] : [],
+        interceptors: r.interceptors ? [...r.interceptors] : []
+      }));
 
     // Prepend registration-time middleware to each route
     if (options.middleware && options.middleware.length > 0) {
       for (const route of routesMetadata) {
-        route.middlewares = [...options.middleware, ...(route.middlewares || [])];
+        route.middlewares = [...options.middleware, ...route.middlewares!];
       }
     }
 
@@ -157,6 +164,7 @@ export class VelocityApplication {
 
         this.controllers.set(combinedPath, controller);
         this.routes.set(combinedPath, routesMetadata);
+        this.controllerPaths.set(controllerClass, combinedPath);
         this.logger.info(
           `Registered controller: ${controllerClass.name} at ${combinedPath} (under ${parentClass.name})`
         );
@@ -168,6 +176,7 @@ export class VelocityApplication {
 
       this.controllers.set(finalPath, controller);
       this.routes.set(finalPath, routesMetadata);
+      this.controllerPaths.set(controllerClass, finalPath);
       this.logger.info(`Registered controller: ${controllerClass.name} at ${finalPath}`);
     }
   }
@@ -175,8 +184,8 @@ export class VelocityApplication {
   /**
    * Process all pending registrations in correct order:
    * 1. Services (so DI is ready)
-   * 2. Global controllers
-   * 3. Scoped controllers (parent paths must exist first)
+   * 2. Controllers in topological order (parents before children)
+   *    with circular dependency detection
    */
   private initializeRegistrations(): void {
     // 1. Register all services
@@ -184,43 +193,83 @@ export class VelocityApplication {
       this.registerService(target, options);
     }
 
-    // 2. Register global controllers first (no scope)
-    for (const { target, options } of this.pendingControllers) {
-      if (!options.scope || options.scope.length === 0) {
-        this.registerController(target, options);
-      }
-    }
-
-    // 3. Register scoped controllers (parent path is now known)
-    for (const { target, options } of this.pendingControllers) {
-      if (options.scope && options.scope.length > 0) {
-        this.registerController(target, options);
-      }
-    }
+    // 2. Detect circular controller nesting and register in topological order
+    this.registerControllersTopological();
 
     // Clear queues
     this.pendingServices.length = 0;
     this.pendingControllers.length = 0;
   }
 
+  /**
+   * Topological sort of pending controllers: parents are registered before children.
+   * Detects circular nesting (A scoped to B, B scoped to A).
+   */
+  private registerControllersTopological(): void {
+    // Build adjacency: child → Set<parent classes it depends on>
+    const dependsOn = new Map<any, Set<any>>();
+    const pending = new Map<any, PendingRegistration>();
+
+    for (const reg of this.pendingControllers) {
+      pending.set(reg.target, reg);
+      if (reg.options.scope && reg.options.scope.length > 0) {
+        dependsOn.set(reg.target, new Set(reg.options.scope));
+      } else {
+        dependsOn.set(reg.target, new Set());
+      }
+    }
+
+    const registered = new Set<any>();
+    const visiting = new Set<any>();   // cycle detection
+
+    const visit = (target: any) => {
+      if (registered.has(target)) return;
+
+      if (visiting.has(target)) {
+        // Build cycle path for error message
+        const names = [...visiting].map((t: any) => t.name).join(' → ');
+        throw new Error(`Circular controller nesting detected: ${names} → ${target.name}`);
+      }
+
+      visiting.add(target);
+
+      // Visit dependencies (parent controllers) first
+      const deps = dependsOn.get(target);
+      if (deps) {
+        for (const dep of deps) {
+          if (pending.has(dep)) {
+            visit(dep);
+          }
+          // If dep isn't pending, it's either already registered or external — fine
+        }
+      }
+
+      visiting.delete(target);
+
+      // Now register this controller
+      const reg = pending.get(target);
+      if (reg) {
+        this.registerController(reg.target, reg.options);
+      }
+      registered.add(target);
+    };
+
+    for (const target of pending.keys()) {
+      visit(target);
+    }
+  }
+
   // ─── Path helpers ───
 
   /** Resolve the final mounted path for a controller class (already registered) */
   private resolveControllerPath(controllerClass: any): string {
-    // Look up the path this controller was registered at
-    const meta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
-    if (!meta) throw new Error(`${controllerClass.name} is not a @Controller`);
-
-    // Check if it's already mounted (find its registered path)
-    for (const [path] of this.controllers) {
-      // Match by checking if we registered this class at this path
-      const registeredController = this.controllers.get(path);
-      if (registeredController && registeredController.constructor === controllerClass) {
-        return path;
-      }
-    }
+    // Direct lookup from the class → path map (set during registerController)
+    const knownPath = this.controllerPaths.get(controllerClass);
+    if (knownPath) return knownPath;
 
     // Not yet mounted — use its decorator path with global prefix
+    const meta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
+    if (!meta) throw new Error(`${controllerClass.name} is not a @Controller`);
     return this.applyGlobalPrefix(meta.path);
   }
 
@@ -230,7 +279,8 @@ export class VelocityApplication {
 
     const exclusions = this.config.get('globalPrefixExclusions') || [];
     for (const exclusion of exclusions) {
-      if (path.startsWith(exclusion)) return path;
+      // Exact match or match at segment boundary (e.g. "/health" excludes "/health" and "/health/check" but not "/healthcheck")
+      if (path === exclusion || path.startsWith(exclusion + '/')) return path;
     }
 
     return this.joinPaths(prefix, path);
