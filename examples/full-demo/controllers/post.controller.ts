@@ -5,7 +5,7 @@ import {
   VelocityRequest, VelocityResponse, MiddlewareFunction,
 } from '@velocity/framework';
 import { db } from '../db';
-import { app } from '../app';
+import { velo } from '../velo';
 import * as Joi from 'joi';
 
 // --- Auth middleware ---
@@ -33,7 +33,7 @@ const createPostSchema = Validator.createSchema({
   author: Joi.string().required()
 });
 
-@Controller('/api/posts')
+@Controller('/posts')
 class PostController {
   @Get('/')
   @UseInterceptor(timingInterceptor)
@@ -77,5 +77,5 @@ class PostController {
   }
 }
 
-// Self-register on the app
-app.register(PostController);
+// Self-register (globalPrefix '/api' → /api/posts)
+velo.register(PostController);

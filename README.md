@@ -6,11 +6,15 @@ A minimal, fast, type-safe TypeScript framework for Node.js with decorators, bui
 
 - **Decorator-based** routing (`@Get`, `@Post`, `@Put`, `@Delete`, `@Patch`)
 - **Self-registration** — controllers, services, entities register themselves
+- **Variadic register** — `velo.register(A, B, C, options?)` with scoping
+- **Scoped DI** — services can be scoped to specific controllers
+- **Controller nesting** — mount controllers under other controllers as sub-routes
+- **Global prefix** — prefix all endpoints (e.g. `/api`) with exclusions
 - **Built-in ORM** — Prisma-like `db.User.findAll()` with SQLite, PostgreSQL, MySQL
 - **Type generation** — `velogen` generates types for DB instances, no `any` casts
-- **Dependency injection** — constructor-based DI with singleton support
+- **Dependency injection** — constructor-based DI with singleton support and child containers
 - **Validation** — Joi schemas with `@Validate` decorator
-- **Middleware & interceptors** — function or class-based, per-route
+- **Middleware & interceptors** — function or class-based, per-route or per-registration
 - **Security** — built-in CORS, rate limiting, security headers (no npm packages)
 - **Logging** — structured Winston-based logging
 - **Zero bloat** — uses Node's `http` module directly, no express
@@ -64,13 +68,14 @@ Now `db.User` and `db.Post` are fully typed. Re-run velogen whenever you add or 
 
 ## Quick Start
 
-### 1. App instance (`app.ts`)
+### 1. Velocity instance (`velo.ts`)
 
 ```typescript
 import { VelocityApplication } from '@velocity/framework';
 
-export const app = new VelocityApplication({
+export const velo = new VelocityApplication({
   port: 5000,
+  globalPrefix: '/api',
   logger: { level: 'info', format: 'combined', outputs: ['console'] },
   cors: { origin: '*', credentials: false },
   rateLimit: { windowMs: 15 * 60 * 1000, max: 100 }
@@ -122,6 +127,12 @@ export class User {
 db.register(User);
 ```
 
+Multi-entity registration:
+
+```typescript
+db.register(User, Post, Comment);
+```
+
 ### 4. Controller (`controllers/user.controller.ts`)
 
 ```typescript
@@ -131,7 +142,7 @@ import {
   VelocityRequest, VelocityResponse, MiddlewareFunction,
 } from '@velocity/framework';
 import { db } from '../db';
-import { app } from '../app';
+import { velo } from '../velo';
 import * as Joi from 'joi';
 
 const authMiddleware: MiddlewareFunction = (req, res, next) => {
@@ -148,7 +159,7 @@ const createUserSchema = Validator.createSchema({
   age: Joi.number().integer().min(1).max(120).optional()
 });
 
-@Controller('/api/users')
+@Controller('/users')
 class UserController {
   @Get('/')
   async list(_req: VelocityRequest, _res: VelocityResponse) {
@@ -171,26 +182,90 @@ class UserController {
   }
 }
 
-app.register(UserController);
+// globalPrefix '/api' → endpoints at /api/users
+velo.register(UserController);
 ```
 
 ### 5. Entry point (`main.ts`)
 
 ```typescript
-import { app } from './app';
+import { velo } from './velo';
 import './entities/user.entity';
 import './controllers/user.controller';
 
 async function main() {
-  await app.listen();
+  await velo.listen();
 }
 
 main().catch(console.error);
 ```
 
+## Registration API
+
+### Variadic registration
+
+Register multiple controllers and/or services in a single call:
+
+```typescript
+velo.register(UserController, PostController);
+velo.register(AuthService, UserService);
+velo.register(AuthService, UserController, PostController);
+```
+
+### Scoped services
+
+Restrict a service to specific controllers (uses child DI containers):
+
+```typescript
+velo.register(AuthService, { scope: [UserController, PostController] });
+```
+
+`AuthService` is only injectable in `UserController` and `PostController`. Other controllers can't access it.
+
+### Controller nesting
+
+Mount a controller's routes as sub-routes of another controller:
+
+```typescript
+@Controller('/users')
+class UserController { ... }
+
+@Controller('/profile')
+class ProfileController { ... }
+
+velo.register(UserController);
+velo.register(ProfileController, { scope: [UserController] });
+// ProfileController routes available at /api/users/profile/...
+```
+
+### Registration options
+
+```typescript
+interface RegisterOptions {
+  scope?: any[];              // Controllers to scope to
+  singleton?: boolean;        // Service: singleton (default true) or transient
+  prefix?: string;            // Override controller's decorator path
+  middleware?: MiddlewareFunction[];  // Additional middleware at registration time
+}
+```
+
+### Global prefix
+
+Prefix all controller endpoints, with optional exclusions:
+
+```typescript
+export const velo = new VelocityApplication({
+  globalPrefix: '/api',
+  globalPrefixExclusions: ['/health', '/metrics']
+});
+
+@Controller('/users')     // → /api/users
+@Controller('/health')    // → /health (excluded)
+```
+
 ## ORM — Entity Accessor API
 
-After `db.register(Entity)` and `app.listen()`, each entity is accessible as `db.EntityName`:
+After `db.register(Entity)` and `velo.listen()`, each entity is accessible as `db.EntityName`:
 
 ```typescript
 // Read
@@ -225,7 +300,7 @@ src/
   index.ts              — Public API exports
   core/
     application.ts      — HTTP server, registration, request pipeline
-    container.ts        — DI container
+    container.ts        — DI container (parent/child, singleton, cycle detection)
   decorators/           — @Controller, @Get/@Post/..., @Service, @UseMiddleware, @UseInterceptor
   orm/
     database.ts         — Database class + DB() factory

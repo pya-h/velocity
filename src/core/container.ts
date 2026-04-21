@@ -12,6 +12,11 @@ export class Container {
   private services = new Map<ServiceIdentifier, ServiceDefinition>();
   private instances = new Map<ServiceIdentifier, any>();
   private resolving = new Set<any>();
+  private parent?: Container;
+
+  constructor(parent?: Container) {
+    this.parent = parent;
+  }
 
   public register<T>(identifier: ServiceIdentifier, serviceOrFactory: T | Constructor<T> | (() => T), singleton = true): void {
     if (typeof serviceOrFactory === 'function') {
@@ -54,6 +59,11 @@ export class Container {
     const service = this.services.get(identifier);
 
     if (!service) {
+      // Fall back to parent container
+      if (this.parent) {
+        return this.parent.resolve(identifier);
+      }
+
       // Try to resolve as constructor
       if (typeof identifier === 'function') {
         return this.createInstance(identifier as Constructor<T>);
@@ -109,7 +119,14 @@ export class Container {
   }
 
   public has(identifier: ServiceIdentifier): boolean {
-    return this.services.has(identifier) || this.instances.has(identifier);
+    if (this.services.has(identifier) || this.instances.has(identifier)) {
+      return true;
+    }
+    return this.parent ? this.parent.has(identifier) : false;
+  }
+
+  public createChild(): Container {
+    return new Container(this);
   }
 
   public clear(): void {

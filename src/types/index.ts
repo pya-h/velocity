@@ -57,6 +57,13 @@ export interface LoggerConfig {
   filename?: string;
 }
 
+export interface RegisterOptions {
+  scope?: any[];
+  singleton?: boolean;
+  prefix?: string;
+  middleware?: MiddlewareFunction[];
+}
+
 export interface ApplicationConfig {
   port: number;
   host: string;
@@ -69,6 +76,8 @@ export interface ApplicationConfig {
     windowMs: number;
     max: number;
   };
+  globalPrefix?: string;
+  globalPrefixExclusions?: string[];
 }
 
 export interface EntityMetadata {

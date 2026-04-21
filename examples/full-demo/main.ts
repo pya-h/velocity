@@ -15,24 +15,24 @@
  *   curl localhost:5000/api/posts
  */
 
-import { app } from './app';
+import { velo } from './velo';
 import { db } from './db';
 
 // Entities self-register on db when imported
 import './entities/user.entity';
 import './entities/post.entity';
 
-// Services self-register on app when imported
+// Services self-register on velo when imported
 import './services/user.service';
 
-// Controllers self-register on app when imported
+// Controllers self-register on velo when imported
 import './controllers/health.controller';
 import './controllers/user.controller';
 import './controllers/post.controller';
 
 async function main() {
-  // Start the server (initializes DB, creates tables, begins listening)
-  await app.listen();
+  // Start the server (processes registrations, initializes DB, begins listening)
+  await velo.listen();
 
   // Seed sample data after DB is ready
   await db.User.create({ name: 'John Doe', email: 'john@example.com', age: 30, createdAt: new Date().toISOString() });

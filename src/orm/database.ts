@@ -47,19 +47,30 @@ export class Database {
    * The entity must be decorated with @Entity().
    * After initialization, it becomes accessible as db.ClassName.
    */
-  register(entityClass: any): this {
-    const metadata: EntityMetadata = Reflect.getMetadata(ENTITY_METADATA_KEY, entityClass);
-    if (!metadata) {
-      throw new Error(`${entityClass.name} is not decorated with @Entity()`);
+  /**
+   * Register one or more entity classes on this database.
+   * Each entity must be decorated with @Entity().
+   * After initialization, entities are accessible as db.ClassName.
+   *
+   * @example
+   *   db.register(User);
+   *   db.register(User, Post, Comment);
+   */
+  register(...entityClasses: any[]): this {
+    for (const entityClass of entityClasses) {
+      const metadata: EntityMetadata = Reflect.getMetadata(ENTITY_METADATA_KEY, entityClass);
+      if (!metadata) {
+        throw new Error(`${entityClass.name} is not decorated with @Entity()`);
+      }
+
+      const accessorName = entityClass.name;
+      const accessor = new EntityAccessor(metadata);
+
+      this.entities.set(accessorName, { entityClass, metadata, accessor });
+
+      // Make accessor available as a property (e.g. db.User)
+      (this as any)[accessorName] = accessor;
     }
-
-    const accessorName = entityClass.name;
-    const accessor = new EntityAccessor(metadata);
-
-    this.entities.set(accessorName, { entityClass, metadata, accessor });
-
-    // Make accessor available as a property (e.g. db.User)
-    (this as any)[accessorName] = accessor;
 
     return this;
   }

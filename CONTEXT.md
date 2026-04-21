@@ -6,14 +6,14 @@ Velocity is a **minimal, fast, type-safe TypeScript framework** for Node.js. Eve
 
 1. **Minimal** — Zero bloat. No express, no heavy ORM, no unused abstractions. The framework uses Node's built-in `http` module directly.
 2. **Fast** — Minimal overhead in the request pipeline. No unnecessary middleware chains, no framework-level parsing beyond what's needed.
-3. **Memory-efficient** — No global registries beyond what's required. Lazy initialization (DB connections created only at `app.listen()`).
+3. **Memory-efficient** — No global registries beyond what's required. Lazy initialization (DB connections created only at `velo.listen()`).
 4. **Type-safe** — First-class TypeScript. `velogen` generates types for DB instances so entity access is fully typed. We stay away from `any` as much as possible.
 
 ## Architecture — Core Design Patterns
 
 ### No Modules
 
-There is no Module/grouping concept. Controllers, services, and interceptors register directly on the app. Developers organize their code however they want — the framework doesn't enforce directory structure or module boundaries.
+There is no Module/grouping concept. Controllers, services, and interceptors register directly on the velo instance. Developers organize their code however they want — the framework doesn't enforce directory structure or module boundaries.
 
 ### Self-Registration
 
@@ -21,16 +21,65 @@ Every component registers itself at the bottom of its own file:
 
 ```typescript
 // user.controller.ts
-@Controller('/api/users')
+@Controller('/users')
 class UserController { ... }
-app.register(UserController);
+velo.register(UserController);
 ```
 
 The main entry point (`main.ts`) only imports these files — it doesn't manually register anything. Each file is self-contained.
 
 **Why**: Reduces boilerplate in the entry point. Adding a new controller means creating one file, not editing two.
 
-**Circular dependency avoidance**: The app instance lives in a separate `app.ts` file, not in `main.ts`. Controllers import from `app.ts`, and `main.ts` imports controllers. No cycles.
+**Circular dependency avoidance**: The velo instance lives in a separate `velo.ts` file, not in `main.ts`. Controllers import from `velo.ts`, and `main.ts` imports controllers. No cycles.
+
+### Variadic Registration with Options
+
+`velo.register()` accepts any mix of controllers and services, with an optional trailing options object:
+
+```typescript
+velo.register(UserController);
+velo.register(AuthService, UserService);
+velo.register(AuthService, { scope: [UserController] });
+velo.register(ProfileController, { scope: [UserController], middleware: [logMiddleware] });
+```
+
+Registration is **deferred** — `register()` queues targets and processes them at `velo.listen()` time. This eliminates import-order dependencies (services can be imported after controllers).
+
+### Scoped Services
+
+Services can be scoped to specific controllers using child DI containers:
+
+```typescript
+velo.register(AuthService, { scope: [UserController, PostController] });
+```
+
+Each scoped controller gets a child container that inherits from the global container but holds the scoped service. Services without `scope` are registered globally and available to all controllers.
+
+### Controller Nesting
+
+Controllers can be mounted as sub-routes of other controllers:
+
+```typescript
+velo.register(ProfileController, { scope: [UserController] });
+// UserController at /users, ProfileController at /profile
+// → ProfileController routes available at /users/profile/...
+```
+
+When a controller is registered globally, it's effectively scoped to an imaginary root controller at `/`.
+
+### Global Prefix
+
+All controller endpoints can be prefixed globally, with exclusions:
+
+```typescript
+const velo = new VelocityApplication({
+  globalPrefix: '/api',
+  globalPrefixExclusions: ['/health']
+});
+
+@Controller('/users')  // → /api/users
+@Controller('/health') // → /health (excluded from prefix)
+```
 
 ### Prisma-like ORM (no Repository pattern)
 
@@ -43,12 +92,14 @@ const post = await db.Post.create({ title: 'Hello', ... });
 
 There is **no Repository layer**. The `EntityAccessor` class provides `findAll`, `findById`, `findOne`, `findMany`, `create`, `update`, `delete`, `deleteWhere`, `count`, and `query()`.
 
-Entities self-register on a DB instance:
+Entities self-register on a DB instance (supports multi-entity):
 
 ```typescript
 @Entity('users')
 class User { ... }
 db.register(User);
+// or
+db.register(User, Post, Comment);
 ```
 
 After registration, `db.User` is available as an `EntityAccessor<User>`.
@@ -94,7 +145,7 @@ src/
   index.ts              — Public API exports
   core/
     application.ts      — VelocityApplication (HTTP server, registration, request pipeline)
-    container.ts        — DI container (singleton, constructor injection, cycle detection)
+    container.ts        — DI container (parent/child, singleton, constructor injection, cycle detection)
   decorators/
     controller.ts       — @Controller(path)
     route.ts            — @Get, @Post, @Put, @Delete, @Patch
@@ -122,7 +173,7 @@ src/
   testing/
     test-utils.ts       — Test app creation, mock request/response
   types/
-    index.ts            — All TypeScript interfaces
+    index.ts            — All TypeScript interfaces (RegisterOptions, ApplicationConfig, etc.)
 ```
 
 ## Development Workflow
@@ -163,11 +214,15 @@ The `npm run sync` script creates a symlink from `node_modules/@velocity/framewo
 | No express | Raw `http` module is faster and has zero dependency overhead |
 | No Module concept | Unnecessary grouping/scoping for a minimal framework |
 | Self-registration | Each file is self-contained; main.ts stays clean |
+| Deferred registration | `register()` queues, `listen()` processes — no import-order issues |
+| Scoped DI | Child containers for per-controller services, inherits global container |
+| Controller nesting | Mount sub-controllers without coupling; path composition at registration |
+| Global prefix | Eliminates `/api` repetition; exclusions for health/metrics endpoints |
 | DB() factory, not config | Databases are first-class objects, not app config |
 | No Repository pattern | Direct `db.Entity.action()` is cleaner than repository classes |
 | velogen for types | Generates types at dev time, zero runtime cost |
 | Built-in CORS/rate-limit/helmet | No npm packages needed — implemented natively |
-| Lazy DB init | Connections created at `app.listen()`, not at import time |
+| Lazy DB init | Connections created at `velo.listen()`, not at import time |
 
 ## Supported Databases
 
@@ -179,10 +234,10 @@ The `DatabaseConnection` class normalizes differences (parameter placeholders, i
 
 ## Entry Point Convention
 
-The entry file is always named `main.ts`. The app instance lives in a separate `app.ts` to avoid circular imports:
+The entry file is always named `main.ts`. The velo instance lives in a separate `velo.ts` to avoid circular imports:
 
 ```
-main.ts   — imports everything, calls app.listen(), seeds data
-app.ts    — creates and exports VelocityApplication instance
+main.ts   — imports everything, calls velo.listen(), seeds data
+velo.ts   — creates and exports VelocityApplication instance
 db.ts     — creates and exports DB instance(s)
 ```

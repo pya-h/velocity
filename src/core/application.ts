@@ -4,11 +4,20 @@ import { Container } from './container';
 import { Logger } from '../logging/logger';
 import { Config } from '../config/config';
 import { Database, _setCurrentApp } from '../orm/database';
-import { VelocityRequest, VelocityResponse, ApplicationConfig, RouteMetadata, ControllerMetadata } from '../types';
+import {
+  VelocityRequest, VelocityResponse, ApplicationConfig,
+  RouteMetadata, ControllerMetadata, RegisterOptions,
+  MiddlewareFunction
+} from '../types';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
 const SERVICE_METADATA_KEY = Symbol.for('service');
+
+interface PendingRegistration {
+  target: any;
+  options: RegisterOptions;
+}
 
 export class VelocityApplication {
   private server: Server;
@@ -18,6 +27,13 @@ export class VelocityApplication {
   private controllers: Map<string, any> = new Map();
   private routes: Map<string, RouteMetadata[]> = new Map();
   private databases: Database[] = [];
+
+  // Deferred registration queues — processed at listen() time
+  private pendingServices: PendingRegistration[] = [];
+  private pendingControllers: PendingRegistration[] = [];
+
+  // Scoped DI: per-controller child containers
+  private controllerContainers = new Map<any, Container>();
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -37,63 +53,203 @@ export class VelocityApplication {
     this.container.register('app', this);
   }
 
+  // ─── Registration API ───
+
   /**
-   * Unified registration method.
-   * Accepts a controller class, a service class, or a pre-built instance.
+   * Unified registration method. Accepts any mix of controllers and services,
+   * with an optional trailing options object.
    *
-   * Controllers: must be decorated with @Controller
-   * Services:    must be decorated with @Service (registered in DI container)
+   * @example
+   *   velo.register(UserController);
+   *   velo.register(UserService, PostService);
+   *   velo.register(AuthService, { scope: [UserController] });
+   *   velo.register(ProfileController, { scope: [UserController] });
+   *   velo.register(UserController, PostController, { middleware: [logMiddleware] });
    */
-  public register(target: any): this {
-    // Check if it's a controller
-    const controllerMeta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, target);
-    if (controllerMeta) {
-      this.registerController(target);
-      return this;
+  public register(...args: any[]): this {
+    if (args.length === 0) return this;
+
+    // Parse: last arg may be an options object (plain object, not a class)
+    let options: RegisterOptions = {};
+    let targets: any[];
+
+    const lastArg = args[args.length - 1];
+    if (args.length > 1 && typeof lastArg === 'object' && lastArg !== null && !lastArg.prototype) {
+      options = lastArg as RegisterOptions;
+      targets = args.slice(0, -1);
+    } else {
+      targets = args;
     }
 
-    // Check if it's a service
-    const serviceMeta = Reflect.getMetadata(SERVICE_METADATA_KEY, target);
-    if (serviceMeta) {
-      this.registerService(target);
-      return this;
+    for (const target of targets) {
+      const controllerMeta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, target);
+      const serviceMeta = Reflect.getMetadata(SERVICE_METADATA_KEY, target);
+
+      if (controllerMeta) {
+        this.pendingControllers.push({ target, options });
+      } else if (serviceMeta) {
+        this.pendingServices.push({ target, options });
+      } else {
+        throw new Error(
+          `${target.name || target} is not decorated with @Controller or @Service`
+        );
+      }
     }
 
-    // Fallback: try as controller (throws if not decorated)
-    this.registerController(target);
     return this;
   }
 
-  /** Register a controller class (must be decorated with @Controller) */
-  public registerController(controllerClass: any): void {
-    const controllerMetadata: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
+  // ─── Internal registration (called at listen() time) ───
 
+  private registerService(serviceClass: any, options: RegisterOptions): void {
+    const serviceMeta = Reflect.getMetadata(SERVICE_METADATA_KEY, serviceClass);
+    const name = serviceMeta?.name || serviceClass.name;
+    const singleton = options.singleton !== undefined ? options.singleton : true;
+
+    if (options.scope && options.scope.length > 0) {
+      // Scoped: register only in specific controller child containers
+      for (const scopeTarget of options.scope) {
+        const child = this.getOrCreateChildContainer(scopeTarget);
+        child.register(serviceClass, serviceClass, singleton);
+        if (name) child.register(name, serviceClass, singleton);
+      }
+      const scopeNames = options.scope.map((s: any) => s.name).join(', ');
+      this.logger.info(`Registered scoped service: ${serviceClass.name} → [${scopeNames}]`);
+    } else {
+      // Global: register in root container
+      this.container.register(serviceClass, serviceClass, singleton);
+      if (name) this.container.register(name, serviceClass, singleton);
+      this.logger.info(`Registered service: ${serviceClass.name}`);
+    }
+  }
+
+  private registerController(controllerClass: any, options: RegisterOptions): void {
+    const controllerMetadata: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
     if (!controllerMetadata) {
       throw new Error(`${controllerClass.name} is not decorated with @Controller`);
     }
 
-    const controller = this.container.resolve(controllerClass);
-    const routesMetadata: RouteMetadata[] = Reflect.getMetadata(ROUTES_METADATA_KEY, controllerClass) || [];
+    // Resolve the controller instance from its container (child if scoped services exist, else root)
+    const container = this.controllerContainers.get(controllerClass) || this.container;
+    const controller = container.resolve(controllerClass);
 
-    this.controllers.set(controllerMetadata.path, controller);
-    this.routes.set(controllerMetadata.path, routesMetadata);
+    // Clone route metadata so per-registration middleware doesn't leak across mounts
+    const routesMetadata: RouteMetadata[] = (Reflect.getMetadata(ROUTES_METADATA_KEY, controllerClass) || [])
+      .map((r: RouteMetadata) => ({ ...r }));
 
-    this.logger.info(`Registered controller: ${controllerClass.name} at ${controllerMetadata.path}`);
-  }
-
-  /** Register a service class in the DI container */
-  public registerService(serviceClass: any): void {
-    const serviceMeta = Reflect.getMetadata(SERVICE_METADATA_KEY, serviceClass);
-    const name = serviceMeta?.name || serviceClass.name;
-
-    // Register both by class and by name for flexible injection
-    this.container.register(serviceClass, serviceClass, true);
-    if (name) {
-      this.container.register(name, serviceClass, true);
+    // Prepend registration-time middleware to each route
+    if (options.middleware && options.middleware.length > 0) {
+      for (const route of routesMetadata) {
+        route.middlewares = [...options.middleware, ...(route.middlewares || [])];
+      }
     }
 
-    this.logger.info(`Registered service: ${serviceClass.name}`);
+    if (options.scope && options.scope.length > 0) {
+      // Controller-on-controller: mount under each scope controller's path
+      for (const parentClass of options.scope) {
+        const parentMeta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, parentClass);
+        if (!parentMeta) {
+          throw new Error(`Scope target ${parentClass.name} is not a @Controller`);
+        }
+        const parentPath = this.resolveControllerPath(parentClass);
+        const childPath = options.prefix || controllerMetadata.path;
+        const combinedPath = this.joinPaths(parentPath, childPath);
+
+        this.controllers.set(combinedPath, controller);
+        this.routes.set(combinedPath, routesMetadata);
+        this.logger.info(
+          `Registered controller: ${controllerClass.name} at ${combinedPath} (under ${parentClass.name})`
+        );
+      }
+    } else {
+      // Global: mount at root (with optional prefix override and global prefix)
+      const controllerPath = options.prefix || controllerMetadata.path;
+      const finalPath = this.applyGlobalPrefix(controllerPath);
+
+      this.controllers.set(finalPath, controller);
+      this.routes.set(finalPath, routesMetadata);
+      this.logger.info(`Registered controller: ${controllerClass.name} at ${finalPath}`);
+    }
   }
+
+  /**
+   * Process all pending registrations in correct order:
+   * 1. Services (so DI is ready)
+   * 2. Global controllers
+   * 3. Scoped controllers (parent paths must exist first)
+   */
+  private initializeRegistrations(): void {
+    // 1. Register all services
+    for (const { target, options } of this.pendingServices) {
+      this.registerService(target, options);
+    }
+
+    // 2. Register global controllers first (no scope)
+    for (const { target, options } of this.pendingControllers) {
+      if (!options.scope || options.scope.length === 0) {
+        this.registerController(target, options);
+      }
+    }
+
+    // 3. Register scoped controllers (parent path is now known)
+    for (const { target, options } of this.pendingControllers) {
+      if (options.scope && options.scope.length > 0) {
+        this.registerController(target, options);
+      }
+    }
+
+    // Clear queues
+    this.pendingServices.length = 0;
+    this.pendingControllers.length = 0;
+  }
+
+  // ─── Path helpers ───
+
+  /** Resolve the final mounted path for a controller class (already registered) */
+  private resolveControllerPath(controllerClass: any): string {
+    // Look up the path this controller was registered at
+    const meta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
+    if (!meta) throw new Error(`${controllerClass.name} is not a @Controller`);
+
+    // Check if it's already mounted (find its registered path)
+    for (const [path] of this.controllers) {
+      // Match by checking if we registered this class at this path
+      const registeredController = this.controllers.get(path);
+      if (registeredController && registeredController.constructor === controllerClass) {
+        return path;
+      }
+    }
+
+    // Not yet mounted — use its decorator path with global prefix
+    return this.applyGlobalPrefix(meta.path);
+  }
+
+  private applyGlobalPrefix(path: string): string {
+    const prefix = this.config.get('globalPrefix');
+    if (!prefix) return path;
+
+    const exclusions = this.config.get('globalPrefixExclusions') || [];
+    for (const exclusion of exclusions) {
+      if (path.startsWith(exclusion)) return path;
+    }
+
+    return this.joinPaths(prefix, path);
+  }
+
+  private joinPaths(base: string, child: string): string {
+    const a = base.endsWith('/') ? base.slice(0, -1) : base;
+    const b = child.startsWith('/') ? child : '/' + child;
+    return a + b;
+  }
+
+  private getOrCreateChildContainer(controllerClass: any): Container {
+    if (!this.controllerContainers.has(controllerClass)) {
+      this.controllerContainers.set(controllerClass, this.container.createChild());
+    }
+    return this.controllerContainers.get(controllerClass)!;
+  }
+
+  // ─── Database registration ───
 
   /** Register a Database instance (called automatically by DB() factory) */
   public registerDatabase(database: Database): void {
@@ -114,9 +270,14 @@ export class VelocityApplication {
     }
   }
 
+  // ─── Lifecycle ───
+
   public async listen(port?: number, host?: string): Promise<void> {
     const finalPort = port || this.config.get('port') || 5000;
     const finalHost = host || this.config.get('host') || '0.0.0.0';
+
+    // Process all pending registrations
+    this.initializeRegistrations();
 
     // Initialize databases before starting the server
     await this.initializeDatabases();
@@ -149,7 +310,7 @@ export class VelocityApplication {
     return this.container;
   }
 
-  // ─── Request handling (unchanged logic) ───
+  // ─── Request handling ───
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const velocityReq = req as VelocityRequest;

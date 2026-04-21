@@ -32,5 +32,5 @@ export { Validator, Validate } from './validation/validator';
 export { Config } from './config/config';
 export { TestUtils } from './testing/test-utils';
 
-// Type exports
+// Type exports (RegisterOptions, ApplicationConfig, etc.)
 export * from './types';

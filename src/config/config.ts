@@ -19,7 +19,9 @@ export class Config {
       rateLimit: config.rateLimit || {
         windowMs: 15 * 60 * 1000,
         max: 100
-      }
+      },
+      globalPrefix: config.globalPrefix,
+      globalPrefixExclusions: config.globalPrefixExclusions
     };
   }
 

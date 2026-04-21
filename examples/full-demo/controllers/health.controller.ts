@@ -1,13 +1,13 @@
 import { Controller, Get, VelocityRequest, VelocityResponse } from '@velocity/framework';
-import { app } from '../app';
+import { velo } from '../velo';
 
-@Controller('/api')
+@Controller('/health')
 class HealthController {
-  @Get('/health')
+  @Get('/')
   async health(_req: VelocityRequest, _res: VelocityResponse) {
     return { status: 'ok', uptime: process.uptime() };
   }
 }
 
-// Self-register on the app
-app.register(HealthController);
+// Self-register (globalPrefix '/api' → /api/health)
+velo.register(HealthController);

@@ -6,7 +6,7 @@ import {
   VelocityRequest, VelocityResponse, MiddlewareFunction,
 } from '@velocity/framework';
 import { db } from '../db';
-import { app } from '../app';
+import { velo } from '../velo';
 import * as Joi from 'joi';
 
 // --- Auth middleware (function-based) ---
@@ -27,7 +27,7 @@ const createUserSchema = Validator.createSchema({
   age: Joi.number().integer().min(1).max(120).optional()
 });
 
-@Controller('/api/users')
+@Controller('/users')
 class UserController {
   @Get('/')
   @UseInterceptor(TransformInterceptor)
@@ -71,5 +71,5 @@ class UserController {
   }
 }
 
-// Self-register on the app
-app.register(UserController);
+// Self-register (globalPrefix '/api' → /api/users)
+velo.register(UserController);

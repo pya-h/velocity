@@ -1,6 +1,6 @@
 import { Service } from '@velocity/framework';
 import { db } from '../db';
-import { app } from '../app';
+import { velo } from '../velo';
 
 @Service()
 export class UserService {
@@ -28,5 +28,5 @@ export class UserService {
   }
 }
 
-// Self-register on the app
-app.register(UserService);
+// Self-register on velo
+velo.register(UserService);
