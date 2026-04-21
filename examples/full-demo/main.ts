@@ -35,9 +35,9 @@ async function main() {
   await app.listen();
 
   // Seed sample data after DB is ready
-  await (db as any).User.create({ name: 'John Doe', email: 'john@example.com', age: 30, createdAt: new Date().toISOString() });
-  await (db as any).User.create({ name: 'Jane Smith', email: 'jane@example.com', age: 25, createdAt: new Date().toISOString() });
-  await (db as any).Post.create({ title: 'Hello World', content: 'First post!', author: 'John Doe', createdAt: new Date().toISOString() });
+  await db.User.create({ name: 'John Doe', email: 'john@example.com', age: 30, createdAt: new Date().toISOString() });
+  await db.User.create({ name: 'Jane Smith', email: 'jane@example.com', age: 25, createdAt: new Date().toISOString() });
+  await db.Post.create({ title: 'Hello World', content: 'First post!', author: 'John Doe', createdAt: new Date().toISOString() });
 
   console.log('Seeded sample data: 2 users, 1 post');
 }

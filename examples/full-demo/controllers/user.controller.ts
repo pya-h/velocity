@@ -3,8 +3,8 @@ import {
   UseMiddleware, UseInterceptor,
   Validate, Validator,
   TransformInterceptor,
-} from '../../../src';
-import { VelocityRequest, VelocityResponse, MiddlewareFunction } from '../../../src/types';
+  VelocityRequest, VelocityResponse, MiddlewareFunction,
+} from '@velocity/framework';
 import { db } from '../db';
 import { app } from '../app';
 import * as Joi from 'joi';
@@ -32,7 +32,7 @@ class UserController {
   @Get('/')
   @UseInterceptor(TransformInterceptor)
   async list(_req: VelocityRequest, _res: VelocityResponse) {
-    const users = await (db as any).User.findAll();
+    const users = await db.User.findAll();
     return { users };
   }
 
@@ -41,7 +41,7 @@ class UserController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    const user = await (db as any).User.findById(id);
+    const user = await db.User.findById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     return { user };
   }
@@ -50,7 +50,7 @@ class UserController {
   @UseMiddleware(authMiddleware)
   @Validate(createUserSchema)
   async create(req: VelocityRequest, res: VelocityResponse) {
-    const user = await (db as any).User.create({
+    const user = await db.User.create({
       ...req.body,
       createdAt: new Date().toISOString()
     });
@@ -63,10 +63,10 @@ class UserController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    const user = await (db as any).User.findById(id);
+    const user = await db.User.findById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    await (db as any).User.delete(id);
+    await db.User.delete(id);
     return res.status(204).send('');
   }
 }

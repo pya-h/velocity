@@ -1,46 +1,32 @@
 {
-  "name": "workspace",
-  "version": "1.0.0",
-  "description": "A comprehensive TypeScript-first Node.js framework with decorators, built-in ORM, logging, and enterprise-grade features.",
-  "main": "index.js",
-  "directories": {
-    "example": "examples"
-  },
+  "name": "@velocity/framework",
+  "version": "0.1.0",
+  "description": "A minimal, fast TypeScript framework with decorators, built-in ORM, and zero bloat.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "sync": "node scripts/sync.js",
+    "dev": "npm run build && npm run sync",
+    "velogen": "node scripts/velogen.js",
+    "test": "jest"
   },
-  "keywords": [],
+  "keywords": ["typescript", "framework", "orm", "decorators", "minimal"],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cors": "^2.8.19",
-    "@types/dotenv": "^6.1.1",
-    "@types/express": "^5.0.3",
-    "@types/helmet": "^0.0.48",
-    "@types/jest": "^30.0.0",
-    "@types/joi": "^17.2.2",
-    "@types/node": "^24.3.0",
-    "@types/pg": "^8.15.5",
-    "@types/supertest": "^6.0.3",
     "better-sqlite3": "^12.2.0",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.1",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.0.1",
-    "helmet": "^8.1.0",
-    "jest": "^30.0.5",
     "joi": "^18.0.1",
     "mysql2": "^3.14.3",
-    "nodemon": "^3.1.10",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
-    "supertest": "^7.1.4",
-    "ts-jest": "^29.4.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.2",
     "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.9.2",
+    "ts-node": "^10.9.2"
   }
 }

@@ -2,8 +2,8 @@ import {
   Controller, Get, Post as HttpPost, Delete,
   UseMiddleware, UseInterceptor,
   Validate, Validator,
-} from '../../../src';
-import { VelocityRequest, VelocityResponse, MiddlewareFunction } from '../../../src/types';
+  VelocityRequest, VelocityResponse, MiddlewareFunction,
+} from '@velocity/framework';
 import { db } from '../db';
 import { app } from '../app';
 import * as Joi from 'joi';
@@ -38,7 +38,7 @@ class PostController {
   @Get('/')
   @UseInterceptor(timingInterceptor)
   async list(_req: VelocityRequest, _res: VelocityResponse) {
-    const posts = await (db as any).Post.findAll();
+    const posts = await db.Post.findAll();
     return { posts };
   }
 
@@ -47,7 +47,7 @@ class PostController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    const post = await (db as any).Post.findById(id);
+    const post = await db.Post.findById(id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
     return { post };
   }
@@ -56,7 +56,7 @@ class PostController {
   @UseMiddleware(authMiddleware)
   @Validate(createPostSchema)
   async create(req: VelocityRequest, res: VelocityResponse) {
-    const post = await (db as any).Post.create({
+    const post = await db.Post.create({
       ...req.body,
       createdAt: new Date().toISOString()
     });
@@ -69,10 +69,10 @@ class PostController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    const post = await (db as any).Post.findById(id);
+    const post = await db.Post.findById(id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    await (db as any).Post.delete(id);
+    await db.Post.delete(id);
     return res.status(204).send('');
   }
 }

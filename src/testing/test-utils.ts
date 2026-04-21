@@ -4,15 +4,11 @@ import { Container } from '../core/container';
 export class TestUtils {
   public static createTestApp(config?: any): VelocityApplication {
     const testConfig = {
-      port: 0, // Random port for testing
-      database: {
-        type: 'sqlite' as const,
-        filename: ':memory:' // In-memory database for testing
-      },
+      port: 0,
       logger: {
         level: 'error' as const,
         format: 'simple' as const,
-        outputs: [] as const // No logging during tests
+        outputs: [] as const
       },
       ...config
     };

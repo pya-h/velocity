@@ -1,4 +1,4 @@
-import { Service } from '../../../src';
+import { Service } from '@velocity/framework';
 import { db } from '../db';
 import { app } from '../app';
 
@@ -6,17 +6,17 @@ import { app } from '../app';
 export class UserService {
   /** Get all users */
   async getAll() {
-    return (db as any).User.findAll();
+    return db.User.findAll();
   }
 
   /** Get user by ID */
   async getById(id: number) {
-    return (db as any).User.findById(id);
+    return db.User.findById(id);
   }
 
   /** Create a new user */
   async create(data: { name: string; email: string; age?: number }) {
-    return (db as any).User.create({
+    return db.User.create({
       ...data,
       createdAt: new Date().toISOString()
     });
@@ -24,7 +24,7 @@ export class UserService {
 
   /** Delete a user */
   async remove(id: number) {
-    return (db as any).User.delete(id);
+    return db.User.delete(id);
   }
 }
 

@@ -1,5 +1,4 @@
-import { Controller, Get } from '../../../src';
-import { VelocityRequest, VelocityResponse } from '../../../src/types';
+import { Controller, Get, VelocityRequest, VelocityResponse } from '@velocity/framework';
 import { app } from '../app';
 
 @Controller('/api')

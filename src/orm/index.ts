@@ -3,6 +3,3 @@ export { QueryBuilder } from './query-builder';
 export { EntityAccessor } from './entity-accessor';
 export { Database, DB } from './database';
 export { Entity, Column, PrimaryKey } from './decorators';
-
-// Deprecated — use DB() + EntityAccessor instead
-export { BaseRepository } from './repository';

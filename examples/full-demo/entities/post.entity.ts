@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryKey } from '../../../src';
+import { Entity, Column, PrimaryKey } from '@velocity/framework';
 import { db } from '../db';
 
 @Entity('posts')

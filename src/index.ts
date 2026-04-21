@@ -8,7 +8,6 @@ export { Container } from './core/container';
 export { Controller } from './decorators/controller';
 export { Get, Post, Put, Delete, Patch } from './decorators/route';
 export { Middleware, UseMiddleware } from './decorators/middleware';
-export { Injectable } from './decorators/injectable';
 export { Interceptor, UseInterceptor } from './decorators/interceptor';
 export { Service } from './decorators/service';
 
@@ -18,9 +17,6 @@ export { DB, Database } from './orm/database';
 export { EntityAccessor } from './orm/entity-accessor';
 export { QueryBuilder } from './orm/query-builder';
 export { DatabaseConnection } from './orm/connection';
-
-// Deprecated — use DB() + EntityAccessor instead
-export { BaseRepository } from './orm/repository';
 
 // Middleware exports
 export { CorsMiddleware } from './middleware/cors';

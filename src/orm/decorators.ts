@@ -48,7 +48,7 @@ export function Column(options: {
   };
 }
 
-export function PrimaryKey(options: { autoIncrement?: boolean } = {}) {
+export function PrimaryKey() {
   return function (target: any, propertyKey: string) {
     const columns: ColumnMetadata[] = Reflect.getMetadata(COLUMN_METADATA_KEY, target.constructor) || [];
     
@@ -66,9 +66,3 @@ export function PrimaryKey(options: { autoIncrement?: boolean } = {}) {
   };
 }
 
-export function Repository(entity: any) {
-  return function <T extends { new (...args: any[]): {} }>(constructor: T) {
-    Reflect.defineMetadata('repository:entity', entity, constructor);
-    return constructor;
-  };
-}

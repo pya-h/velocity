@@ -38,7 +38,6 @@ export interface RouteMetadata {
 export interface ControllerMetadata {
   path: string;
   target: any;
-  routes: RouteMetadata[];
 }
 
 export interface DatabaseConfig {
@@ -61,7 +60,6 @@ export interface LoggerConfig {
 export interface ApplicationConfig {
   port: number;
   host: string;
-  database?: DatabaseConfig | null;
   logger?: LoggerConfig;
   cors?: {
     origin: string | string[];

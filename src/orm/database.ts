@@ -18,11 +18,6 @@ export function _setCurrentApp(app: any): void {
   _pendingDatabases.length = 0;
 }
 
-/** Called by VelocityApplication to get pending databases */
-export function _getPendingDatabases(): Database[] {
-  return [..._pendingDatabases];
-}
-
 interface RegisteredEntity {
   entityClass: any;
   metadata: EntityMetadata;
