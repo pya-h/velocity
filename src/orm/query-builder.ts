@@ -1,5 +1,13 @@
 import { DatabaseConnection } from './connection';
 
+// Validates and quotes a SQL identifier to prevent injection
+function quoteIdentifier(name: string): string {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name)) {
+    throw new Error(`Invalid SQL identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
 export class QueryBuilder {
   private selectFields: string[] = [];
   private fromTable: string = '';
@@ -33,17 +41,17 @@ export class QueryBuilder {
   }
 
   public join(table: string, condition: string): QueryBuilder {
-    this.joinClauses.push(`JOIN ${table} ON ${condition}`);
+    this.joinClauses.push(`JOIN ${quoteIdentifier(table)} ON ${condition}`);
     return this;
   }
 
   public leftJoin(table: string, condition: string): QueryBuilder {
-    this.joinClauses.push(`LEFT JOIN ${table} ON ${condition}`);
+    this.joinClauses.push(`LEFT JOIN ${quoteIdentifier(table)} ON ${condition}`);
     return this;
   }
 
   public orderBy(field: string, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder {
-    this.orderByFields.push(`${field} ${direction}`);
+    this.orderByFields.push(`${quoteIdentifier(field)} ${direction}`);
     return this;
   }
 
@@ -70,38 +78,42 @@ export class QueryBuilder {
 
   private buildQuery(): string {
     let sql = 'SELECT ';
-    
+
     // SELECT clause
-    sql += this.selectFields.length > 0 ? this.selectFields.join(', ') : '*';
-    
+    if (this.selectFields.length > 0) {
+      sql += this.selectFields.map(f => f === '*' ? '*' : quoteIdentifier(f)).join(', ');
+    } else {
+      sql += '*';
+    }
+
     // FROM clause
-    sql += ` FROM ${this.fromTable}`;
-    
+    sql += ` FROM ${quoteIdentifier(this.fromTable)}`;
+
     // JOIN clauses
     if (this.joinClauses.length > 0) {
       sql += ' ' + this.joinClauses.join(' ');
     }
-    
+
     // WHERE clause
     if (this.whereConditions.length > 0) {
       sql += ' WHERE ' + this.whereConditions.join(' AND ');
     }
-    
+
     // ORDER BY clause
     if (this.orderByFields.length > 0) {
       sql += ' ORDER BY ' + this.orderByFields.join(', ');
     }
-    
+
     // LIMIT clause
     if (this.limitValue !== undefined) {
       sql += ` LIMIT ${this.limitValue}`;
     }
-    
+
     // OFFSET clause
     if (this.offsetValue !== undefined) {
       sql += ` OFFSET ${this.offsetValue}`;
     }
-    
+
     return sql;
   }
 
@@ -124,6 +136,7 @@ export class QueryBuilder {
 class InsertBuilder {
   private table: string = '';
   private data: Record<string, any> = {};
+  private returningField?: string;
 
   constructor(private connection: DatabaseConnection) {}
 
@@ -137,12 +150,24 @@ class InsertBuilder {
     return this;
   }
 
+  public returning(field: string): InsertBuilder {
+    this.returningField = field;
+    return this;
+  }
+
   public async execute(): Promise<any> {
     const fields = Object.keys(this.data);
     const values = Object.values(this.data);
+    const quotedFields = fields.map(f => quoteIdentifier(f)).join(', ');
     const placeholders = fields.map(() => '?').join(', ');
-    
-    const sql = `INSERT INTO ${this.table} (${fields.join(', ')}) VALUES (${placeholders})`;
+
+    let sql = `INSERT INTO ${quoteIdentifier(this.table)} (${quotedFields}) VALUES (${placeholders})`;
+
+    // Add RETURNING clause for PostgreSQL
+    if (this.returningField && this.connection.getType() === 'postgresql') {
+      sql += ` RETURNING ${quoteIdentifier(this.returningField)}`;
+    }
+
     return await this.connection.execute(sql, values);
   }
 }
@@ -172,15 +197,15 @@ class UpdateBuilder {
   }
 
   public async execute(): Promise<any> {
-    const setClause = Object.keys(this.data).map(key => `${key} = ?`).join(', ');
+    const setClause = Object.keys(this.data).map(key => `${quoteIdentifier(key)} = ?`).join(', ');
     const dataValues = Object.values(this.data);
-    
-    let sql = `UPDATE ${this.table} SET ${setClause}`;
-    
+
+    let sql = `UPDATE ${quoteIdentifier(this.table)} SET ${setClause}`;
+
     if (this.whereConditions.length > 0) {
       sql += ' WHERE ' + this.whereConditions.join(' AND ');
     }
-    
+
     return await this.connection.execute(sql, [...dataValues, ...this.parameters]);
   }
 }
@@ -204,12 +229,12 @@ class DeleteBuilder {
   }
 
   public async execute(): Promise<any> {
-    let sql = `DELETE FROM ${this.table}`;
-    
+    let sql = `DELETE FROM ${quoteIdentifier(this.table)}`;
+
     if (this.whereConditions.length > 0) {
       sql += ' WHERE ' + this.whereConditions.join(' AND ');
     }
-    
+
     return await this.connection.execute(sql, this.parameters);
   }
 }

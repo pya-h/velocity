@@ -26,15 +26,23 @@ export class Config {
 
   private getDefaultDatabaseConfig() {
     if (process.env.DATABASE_URL) {
-      const url = new URL(process.env.DATABASE_URL);
-      return {
-        type: url.protocol.slice(0, -1) as any,
-        host: url.hostname,
-        port: parseInt(url.port),
-        database: url.pathname.slice(1),
-        username: url.username,
-        password: url.password
-      };
+      try {
+        const url = new URL(process.env.DATABASE_URL);
+        const protocol = url.protocol.slice(0, -1); // Remove trailing ':'
+        const validTypes = ['sqlite', 'postgresql', 'mysql'];
+        const type = validTypes.includes(protocol) ? protocol as 'sqlite' | 'postgresql' | 'mysql' : 'sqlite';
+
+        return {
+          type,
+          host: url.hostname || 'localhost',
+          port: url.port ? parseInt(url.port, 10) : undefined,
+          database: url.pathname.slice(1) || 'app',
+          username: url.username || undefined,
+          password: url.password || undefined
+        };
+      } catch {
+        // Malformed DATABASE_URL — fall through to default
+      }
     }
 
     return {

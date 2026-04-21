@@ -11,6 +11,12 @@ export class DatabaseConnection {
     this.config = config;
   }
 
+  // Convert ? placeholders to $1, $2, ... for PostgreSQL
+  private toPgParams(sql: string): string {
+    let idx = 0;
+    return sql.replace(/\?/g, () => `$${++idx}`);
+  }
+
   public async connect(): Promise<void> {
     switch (this.config.type) {
       case 'sqlite':
@@ -50,7 +56,7 @@ export class DatabaseConnection {
         return stmt.all(params);
       
       case 'postgresql':
-        const result = await this.connection.query(sql, params);
+        const result = await this.connection.query(this.toPgParams(sql), params);
         return result.rows;
       
       case 'mysql':
@@ -69,7 +75,7 @@ export class DatabaseConnection {
         return stmt.run(params);
       
       case 'postgresql':
-        return await this.connection.query(sql, params);
+        return await this.connection.query(this.toPgParams(sql), params);
       
       case 'mysql':
         return await this.connection.execute(sql, params);

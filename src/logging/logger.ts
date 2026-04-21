@@ -9,7 +9,7 @@ export class Logger {
     format: 'simple',
     outputs: ['console']
   }) {
-    const formats = {
+    const formats: Record<string, winston.Logform.Format> = {
       json: winston.format.json(),
       simple: winston.format.simple(),
       combined: winston.format.combine(
@@ -21,18 +21,19 @@ export class Logger {
       )
     };
 
+    const selectedFormat = formats[config.format] || formats.simple;
     const transports: winston.transport[] = [];
 
     if (config.outputs.includes('console')) {
       transports.push(new winston.transports.Console({
-        format: formats[config.format]
+        format: selectedFormat
       }));
     }
 
     if (config.outputs.includes('file') && config.filename) {
       transports.push(new winston.transports.File({
         filename: config.filename,
-        format: formats[config.format]
+        format: selectedFormat
       }));
     }
 

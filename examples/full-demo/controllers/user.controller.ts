@@ -1,0 +1,75 @@
+import {
+  Controller, Get, Post as HttpPost, Delete,
+  UseMiddleware, UseInterceptor,
+  Validate, Validator,
+  TransformInterceptor,
+} from '../../../src';
+import { VelocityRequest, VelocityResponse, MiddlewareFunction } from '../../../src/types';
+import { db } from '../db';
+import { app } from '../app';
+import * as Joi from 'joi';
+
+// --- Auth middleware (function-based) ---
+const authMiddleware: MiddlewareFunction = (req, res, next) => {
+  const token = req.headers['authorization'];
+  if (!token) {
+    res.status(401).json({ error: 'Authorization header required' });
+    return;
+  }
+  (req as any).user = { id: 1, role: 'admin' };
+  next();
+};
+
+// --- Validation schema ---
+const createUserSchema = Validator.createSchema({
+  name: Joi.string().required(),
+  email: Joi.string().email().required(),
+  age: Joi.number().integer().min(1).max(120).optional()
+});
+
+@Controller('/api/users')
+class UserController {
+  @Get('/')
+  @UseInterceptor(TransformInterceptor)
+  async list(_req: VelocityRequest, _res: VelocityResponse) {
+    const users = await (db as any).User.findAll();
+    return { users };
+  }
+
+  @Get('/:id')
+  async getById(req: VelocityRequest, res: VelocityResponse) {
+    const id = parseInt(req.params!.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    const user = await (db as any).User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    return { user };
+  }
+
+  @HttpPost('/')
+  @UseMiddleware(authMiddleware)
+  @Validate(createUserSchema)
+  async create(req: VelocityRequest, res: VelocityResponse) {
+    const user = await (db as any).User.create({
+      ...req.body,
+      createdAt: new Date().toISOString()
+    });
+    return res.status(201).json({ user });
+  }
+
+  @Delete('/:id')
+  @UseMiddleware(authMiddleware)
+  async remove(req: VelocityRequest, res: VelocityResponse) {
+    const id = parseInt(req.params!.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    const user = await (db as any).User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await (db as any).User.delete(id);
+    return res.status(204).send('');
+  }
+}
+
+// Self-register on the app
+app.register(UserController);

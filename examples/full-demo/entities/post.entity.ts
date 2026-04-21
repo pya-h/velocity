@@ -1,4 +1,5 @@
 import { Entity, Column, PrimaryKey } from '../../../src';
+import { db } from '../db';
 
 @Entity('posts')
 export class Post {
@@ -14,17 +15,17 @@ export class Post {
   @Column()
   author: string;
 
-  @Column({ nullable: true })
-  publishedAt?: Date;
-
   @Column()
-  createdAt: Date;
+  createdAt: string;
 
   constructor() {
     this.id = 0;
     this.title = '';
     this.content = '';
     this.author = '';
-    this.createdAt = new Date();
+    this.createdAt = new Date().toISOString();
   }
 }
+
+// Self-register on the database
+db.register(Post);

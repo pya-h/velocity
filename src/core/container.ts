@@ -11,6 +11,7 @@ interface ServiceDefinition {
 export class Container {
   private services = new Map<ServiceIdentifier, ServiceDefinition>();
   private instances = new Map<ServiceIdentifier, any>();
+  private resolving = new Set<any>();
 
   public register<T>(identifier: ServiceIdentifier, serviceOrFactory: T | Constructor<T> | (() => T), singleton = true): void {
     if (typeof serviceOrFactory === 'function') {
@@ -44,6 +45,12 @@ export class Container {
       return this.instances.get(identifier);
     }
 
+    // Circular dependency detection
+    if (this.resolving.has(identifier)) {
+      const name = typeof identifier === 'function' ? identifier.name : String(identifier);
+      throw new Error(`Circular dependency detected while resolving: ${name}`);
+    }
+
     const service = this.services.get(identifier);
 
     if (!service) {
@@ -75,23 +82,30 @@ export class Container {
   }
 
   private createInstance<T>(constructor: Constructor<T>): T {
-    // Get constructor parameter types
-    const paramTypes = Reflect.getMetadata('design:paramtypes', constructor) || [];
-    
-    // Resolve dependencies
-    const dependencies = paramTypes.map((type: any) => {
-      try {
-        return this.resolve(type);
-      } catch (error) {
-        // If dependency not found, try to create it
-        if (typeof type === 'function') {
-          return this.createInstance(type);
-        }
-        throw error;
-      }
-    });
+    // Track that we're resolving this constructor to detect cycles
+    this.resolving.add(constructor);
 
-    return new constructor(...dependencies);
+    try {
+      // Get constructor parameter types
+      const paramTypes = Reflect.getMetadata('design:paramtypes', constructor) || [];
+
+      // Resolve dependencies
+      const dependencies = paramTypes.map((type: any) => {
+        try {
+          return this.resolve(type);
+        } catch (error) {
+          // If dependency not found, try to create it
+          if (typeof type === 'function' && error instanceof Error && error.message.includes('not found')) {
+            return this.createInstance(type);
+          }
+          throw error;
+        }
+      });
+
+      return new constructor(...dependencies);
+    } finally {
+      this.resolving.delete(constructor);
+    }
   }
 
   public has(identifier: ServiceIdentifier): boolean {
@@ -101,5 +115,6 @@ export class Container {
   public clear(): void {
     this.services.clear();
     this.instances.clear();
+    this.resolving.clear();
   }
 }

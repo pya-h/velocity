@@ -1,7 +1,7 @@
 import { EntityMetadata, ColumnMetadata } from '../types';
 
-const ENTITY_METADATA_KEY = Symbol('entity');
-const COLUMN_METADATA_KEY = Symbol('column');
+const ENTITY_METADATA_KEY = Symbol.for('entity');
+const COLUMN_METADATA_KEY = Symbol.for('column');
 
 export function Entity(tableName?: string) {
   return function <T extends { new (...args: any[]): {} }>(constructor: T) {

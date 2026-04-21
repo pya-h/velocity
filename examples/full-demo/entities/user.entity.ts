@@ -1,4 +1,5 @@
 import { Entity, Column, PrimaryKey } from '../../../src';
+import { db } from '../db';
 
 @Entity('users')
 export class User {
@@ -15,12 +16,15 @@ export class User {
   age?: number;
 
   @Column()
-  createdAt: Date;
+  createdAt: string;
 
   constructor() {
     this.id = 0;
     this.name = '';
     this.email = '';
-    this.createdAt = new Date();
+    this.createdAt = new Date().toISOString();
   }
 }
+
+// Self-register on the database
+db.register(User);
