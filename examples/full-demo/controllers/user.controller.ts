@@ -16,7 +16,7 @@ const authMiddleware: MiddlewareFunction = (req, res, next) => {
     res.status(401).json({ error: 'Authorization header required' });
     return;
   }
-  (req as any).user = { id: 1, role: 'admin' };
+  req.user = { id: 1, role: 'admin' };
   next();
 };
 

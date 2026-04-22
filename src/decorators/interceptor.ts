@@ -1,7 +1,7 @@
 import { InterceptorFunction, RouteMetadata } from '../types';
 
 const ROUTES_METADATA_KEY = Symbol.for('routes');
-const INTERCEPTOR_METADATA_KEY = Symbol('interceptor');
+const INTERCEPTOR_METADATA_KEY = Symbol.for('interceptor');
 const PENDING_INTERCEPTORS_KEY = Symbol.for('pending_interceptors');
 
 export function Interceptor(order: number = 0) {

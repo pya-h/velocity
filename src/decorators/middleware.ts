@@ -1,7 +1,7 @@
 import { MiddlewareFunction, RouteMetadata } from '../types';
 
 const ROUTES_METADATA_KEY = Symbol.for('routes');
-const MIDDLEWARE_METADATA_KEY = Symbol('middleware');
+const MIDDLEWARE_METADATA_KEY = Symbol.for('middleware');
 const PENDING_MIDDLEWARES_KEY = Symbol.for('pending_middlewares');
 
 export function Middleware(order: number = 0) {

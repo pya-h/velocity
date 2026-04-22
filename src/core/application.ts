@@ -1,5 +1,4 @@
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
-import { parse } from 'url';
 import { Container } from './container';
 import { Logger } from '../logging/logger';
 import { Config } from '../config/config';
@@ -77,7 +76,9 @@ export class VelocityApplication {
     let targets: any[];
 
     const lastArg = args[args.length - 1];
-    if (args.length > 1 && typeof lastArg === 'object' && lastArg !== null && !lastArg.prototype) {
+    const isPlainObj = typeof lastArg === 'object' && lastArg !== null
+      && Object.getPrototypeOf(lastArg) === Object.prototype;
+    if (args.length > 1 && isPlainObj) {
       options = lastArg as RegisterOptions;
       targets = args.slice(0, -1);
     } else {
@@ -367,14 +368,15 @@ export class VelocityApplication {
     const velocityRes = this.enhanceResponse(res);
 
     try {
-      const { pathname, query } = parse(req.url || '', true);
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const pathname = url.pathname;
       const method = req.method?.toUpperCase() || 'GET';
 
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
         velocityReq.body = await this.parseBody(req);
       }
 
-      velocityReq.query = query as Record<string, string>;
+      velocityReq.query = Object.fromEntries(url.searchParams);
 
       const { controller, route, params } = this.findRoute(pathname || '/', method);
 
@@ -459,20 +461,22 @@ export class VelocityApplication {
     const MAX_BODY_SIZE = 1024 * 1024;
 
     return new Promise((resolve, reject) => {
-      let body = '';
+      const chunks: Buffer[] = [];
       let size = 0;
 
       req.on('data', (chunk: Buffer | string) => {
-        size += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        size += buf.length;
         if (size > MAX_BODY_SIZE) {
           req.destroy();
           reject(new Error('Request body too large'));
           return;
         }
-        body += chunk;
+        chunks.push(buf);
       });
       req.on('end', () => {
         try {
+          const body = Buffer.concat(chunks).toString('utf-8');
           const contentType = req.headers['content-type'] || '';
           if (contentType.includes('application/json')) {
             resolve(JSON.parse(body));

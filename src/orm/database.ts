@@ -43,11 +43,6 @@ export class Database {
   }
 
   /**
-   * Register an entity class on this database.
-   * The entity must be decorated with @Entity().
-   * After initialization, it becomes accessible as db.ClassName.
-   */
-  /**
    * Register one or more entity classes on this database.
    * Each entity must be decorated with @Entity().
    * After initialization, entities are accessible as db.ClassName.
