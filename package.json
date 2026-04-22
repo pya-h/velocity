@@ -9,6 +9,7 @@
     "sync": "node scripts/sync.js",
     "dev": "npm run build && npm run sync",
     "velogen": "node scripts/velogen.js",
+    "envgen": "node scripts/envgen.js",
     "test": "jest"
   },
   "keywords": ["typescript", "framework", "orm", "decorators", "minimal"],

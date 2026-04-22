@@ -30,6 +30,8 @@ export { TransformInterceptor } from './interceptors/transform';
 export { Logger } from './logging/logger';
 export { Validator, Validate } from './validation/validator';
 export { Config } from './config/config';
+export { createEnvelocity } from './config/envelocity';
+export type { EnvelocityOptions } from './config/envelocity';
 export { TestUtils } from './testing/test-utils';
 
 // Type exports (RegisterOptions, ApplicationConfig, etc.)
