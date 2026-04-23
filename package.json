@@ -10,6 +10,7 @@
     "dev": "npm run build && npm run sync",
     "velogen": "node scripts/velogen.js",
     "envgen": "node scripts/envgen.js",
+    "apitester": "node scripts/apitester.js",
     "demo": "cd examples/full-demo && node -r ../../node_modules/ts-node/register main.ts",
     "test": "jest"
   },

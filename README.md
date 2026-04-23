@@ -11,11 +11,14 @@ A minimal, fast, type-safe TypeScript framework for Node.js with decorators, bui
 - **Controller nesting** — mount controllers under other controllers as sub-routes
 - **Global prefix** — prefix all endpoints (e.g. `/api`) with exclusions
 - **Built-in ORM** — Prisma-like `db.User.findAll()` with SQLite, PostgreSQL, MySQL
+- **Static file serving** — `velo.serve()` and `velo.static()` for files and directories
 - **Type generation** — `velogen` generates types for DB instances, no `any` casts
+- **Envelocity** — typed, read-only `.env` wrapper with `OrThrow` getters
+- **API Tester** — auto-generated testing UI from controller metadata
 - **Dependency injection** — constructor-based DI with singleton support and child containers
 - **Validation** — Joi schemas with `@Validate` decorator
 - **Middleware & interceptors** — function or class-based, per-route or per-registration
-- **Security** — built-in CORS, rate limiting, security headers (no npm packages)
+- **CORS** — built-in CORS with config-based origin, methods, credentials
 - **Logging** — structured Winston-based logging
 - **Zero bloat** — uses Node's `http` module directly, no express
 
@@ -26,45 +29,28 @@ A minimal, fast, type-safe TypeScript framework for Node.js with decorators, bui
 | `npm run build` | Compile framework (`src/` → `dist/`) |
 | `npm run sync` | Symlink `dist/` into `node_modules/@velocity/framework` |
 | `npm run dev` | Build + sync in one step |
-| `npm run velogen -- <dir>` | Generate typed DB interfaces for a project directory |
-| `npx ts-node <file>` | Run a TypeScript file directly |
+| `npm run demo` | Run the full-demo example |
+| `npm run velogen -- <dir>` | Generate typed DB interfaces from entity files |
+| `npm run envgen -- <dir>` | Generate typed env config from `.env` file |
+| `npm run apitester -- <dir>` | Generate interactive API testing UI from controllers |
 
-### Development workflow
+### Development Workflow
 
 ```bash
-# Install dependencies
 npm install
+npm run dev                            # Build + symlink
 
-# Build the framework and make it available as @velocity/framework
-npm run dev
+# Code generation (run after adding entities, env vars, or controllers)
+npm run velogen -- examples/full-demo  # DB types
+npm run envgen -- examples/full-demo   # Env config types
+npm run apitester -- examples/full-demo # API tester UI
 
-# Generate DB types for the example
-npm run velogen -- examples/full-demo
-
-# Run the example
-npx ts-node examples/full-demo/main.ts
+# Run the demo
+npm run demo                           # → http://localhost:5000
+                                       # → http://localhost:5000/apitester
 ```
 
 After modifying framework source, re-run `npm run dev` to rebuild and sync.
-
-### velogen — Type Generator
-
-`velogen` scans `*.entity.ts` files, finds `db.register(Entity)` calls, and generates a `generated/velocity-types.d.ts` with typed interfaces for each DB instance.
-
-```bash
-npm run velogen -- examples/full-demo
-```
-
-Then in your `db.ts`:
-
-```typescript
-import { DB } from '@velocity/framework';
-import type { TypedDb } from './generated/velocity-types';
-
-export const db = DB({ type: 'sqlite', database: ':memory:', filename: ':memory:' }) as TypedDb;
-```
-
-Now `db.User` and `db.Post` are fully typed. Re-run velogen whenever you add or remove entities.
 
 ## Quick Start
 
@@ -76,9 +62,7 @@ import { VelocityApplication } from '@velocity/framework';
 export const velo = new VelocityApplication({
   port: 5000,
   globalPrefix: '/api',
-  logger: { level: 'info', format: 'combined', outputs: ['console'] },
   cors: { origin: '*', credentials: false },
-  rateLimit: { windowMs: 15 * 60 * 1000, max: 100 }
 });
 ```
 
@@ -86,7 +70,7 @@ export const velo = new VelocityApplication({
 
 ```typescript
 import { DB } from '@velocity/framework';
-import type { TypedDb } from './generated/velocity-types';
+import type { TypedDb } from './velo/velocity-types';
 
 export const db = DB({
   type: 'sqlite',
@@ -95,18 +79,11 @@ export const db = DB({
 }) as TypedDb;
 ```
 
-Multi-database support:
-
-```typescript
-export const mainDb = DB({ type: 'postgresql', host: 'localhost', database: 'app', username: 'user', password: 'pass' });
-export const cacheDb = DB('cache', { type: 'sqlite', database: ':memory:', filename: ':memory:' });
-```
-
-### 3. Entity (`entities/user.entity.ts`)
+### 3. Entity (`src/entities/user.entity.ts`)
 
 ```typescript
 import { Entity, Column, PrimaryKey } from '@velocity/framework';
-import { db } from '../db';
+import { db } from '../../db';
 
 @Entity('users')
 export class User {
@@ -114,174 +91,158 @@ export class User {
   @Column() name: string;
   @Column({ unique: true }) email: string;
   @Column({ nullable: true }) age?: number;
-  @Column() createdAt: string;
-
-  constructor() {
-    this.id = 0;
-    this.name = '';
-    this.email = '';
-    this.createdAt = new Date().toISOString();
-  }
+  constructor() { this.id = 0; this.name = ''; this.email = ''; }
 }
 
 db.register(User);
 ```
 
-Multi-entity registration:
+### 4. Controller (`src/controllers/user.controller.ts`)
 
 ```typescript
-db.register(User, Post, Comment);
-```
-
-### 4. Controller (`controllers/user.controller.ts`)
-
-```typescript
-import {
-  Controller, Get, Post as HttpPost, Delete,
-  UseMiddleware, Validate, Validator,
-  VelocityRequest, VelocityResponse, MiddlewareFunction,
-} from '@velocity/framework';
-import { db } from '../db';
-import { velo } from '../velo';
+import { Controller, Get, Post as HttpPost, UseMiddleware, Validate, Validator,
+         VelocityRequest, VelocityResponse, MiddlewareFunction } from '@velocity/framework';
+import { db } from '../../db';
+import { velo } from '../../velo';
 import * as Joi from 'joi';
 
-const authMiddleware: MiddlewareFunction = (req, res, next) => {
-  if (!req.headers['authorization']) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
+const auth: MiddlewareFunction = (req, res, next) => {
+  if (!req.headers['authorization']) { res.status(401).json({ error: 'Unauthorized' }); return; }
   next();
 };
-
-const createUserSchema = Validator.createSchema({
-  name: Joi.string().required(),
-  email: Joi.string().email().required(),
-  age: Joi.number().integer().min(1).max(120).optional()
-});
 
 @Controller('/users')
 class UserController {
   @Get('/')
-  async list(_req: VelocityRequest, _res: VelocityResponse) {
-    return { users: await db.User.findAll() };
-  }
+  async list() { return { users: await db.User.findAll() }; }
 
   @HttpPost('/')
-  @UseMiddleware(authMiddleware)
-  @Validate(createUserSchema)
+  @UseMiddleware(auth)
+  @Validate(Validator.createSchema({ name: Joi.string().required(), email: Joi.string().email().required() }))
   async create(req: VelocityRequest, res: VelocityResponse) {
-    const user = await db.User.create({ ...req.body, createdAt: new Date().toISOString() });
-    return res.status(201).json({ user });
-  }
-
-  @Delete('/:id')
-  @UseMiddleware(authMiddleware)
-  async remove(req: VelocityRequest, res: VelocityResponse) {
-    await db.User.delete(parseInt(req.params!.id));
-    return res.status(204).send('');
+    return res.status(201).json({ user: await db.User.create(req.body) });
   }
 }
 
-// globalPrefix '/api' → endpoints at /api/users
 velo.register(UserController);
 ```
 
 ### 5. Entry point (`main.ts`)
 
 ```typescript
+import * as path from 'path';
 import { velo } from './velo';
-import './entities/user.entity';
-import './controllers/user.controller';
+import './src/entities/user.entity';
+import './src/controllers/user.controller';
 
-async function main() {
-  await velo.listen();
-}
+velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));
 
+async function main() { await velo.listen(); }
 main().catch(console.error);
+```
+
+## Tools
+
+### velogen — DB Type Generator
+
+Scans `*.entity.ts` files and generates `velo/velocity-types.d.ts` with typed interfaces.
+
+```bash
+npm run velogen -- examples/full-demo
+```
+
+### envgen — Envelocity Config Generator
+
+Reads `.env`, generates typed read-only config with `OrThrow` getters.
+
+```bash
+npm run envgen -- examples/full-demo
+```
+
+```typescript
+import { envelocity } from './velo/envelocity';
+
+envelocity.db.type              // "sqlite" | undefined
+envelocity.db.typeOrThrow       // "sqlite" (throws if missing)
+envelocity.auth.jwtSecret       // string | undefined
+envelocity.server.port = '3000' // Error: read-only
+```
+
+Naming rules:
+- `_` → camelCase: `DB_HOST` → `dbHost`
+- `__` → nesting: `DB__HOST` → `db.host`
+- `___` → preserved underscore: `DB___HOST` → `db._host`
+
+### apitester — API Testing UI Generator
+
+Scans controllers, extracts routes/validation/auth, generates an interactive HTML tester.
+
+```bash
+npm run apitester -- examples/full-demo
+```
+
+Features:
+- All endpoints auto-discovered from `@Controller`/`@Get`/`@Post` decorators
+- Sample request bodies pre-filled from Joi validation schemas
+- Auth token management (persistent, auto-enabled for protected endpoints)
+- Response time, status, body size per request
+- Performance log with min/max/avg stats
+- Light/dark theme (persistent)
+- Keyboard shortcut: `Ctrl+Enter` to send
+
+## Static File Serving
+
+```typescript
+// Serve a single file at a URL
+velo.serve('/docs', path.join(__dirname, 'public/docs.html'));
+
+// Serve a directory under a prefix
+velo.static('/assets/', path.join(__dirname, 'public/assets'));
 ```
 
 ## Registration API
 
 ### Variadic registration
 
-Register multiple controllers and/or services in a single call:
-
 ```typescript
 velo.register(UserController, PostController);
 velo.register(AuthService, UserService);
-velo.register(AuthService, UserController, PostController);
 ```
 
 ### Scoped services
 
-Restrict a service to specific controllers (uses child DI containers):
-
 ```typescript
-velo.register(AuthService, { scope: [UserController, PostController] });
+velo.register(AuthService, { scope: [UserController] });
 ```
-
-`AuthService` is only injectable in `UserController` and `PostController`. Other controllers can't access it.
 
 ### Controller nesting
 
-Mount a controller's routes as sub-routes of another controller:
-
 ```typescript
-@Controller('/users')
-class UserController { ... }
-
-@Controller('/profile')
-class ProfileController { ... }
-
-velo.register(UserController);
 velo.register(ProfileController, { scope: [UserController] });
-// ProfileController routes available at /api/users/profile/...
+// ProfileController routes at /api/users/profile/...
 ```
 
-### Registration options
+### Options
 
 ```typescript
 interface RegisterOptions {
   scope?: any[];              // Controllers to scope to
-  singleton?: boolean;        // Service: singleton (default true) or transient
-  prefix?: string;            // Override controller's decorator path
-  middleware?: MiddlewareFunction[];  // Additional middleware at registration time
+  singleton?: boolean;        // Singleton (default) or transient
+  prefix?: string;            // Override controller path
+  middleware?: MiddlewareFunction[];  // Additional middleware
 }
-```
-
-### Global prefix
-
-Prefix all controller endpoints, with optional exclusions:
-
-```typescript
-export const velo = new VelocityApplication({
-  globalPrefix: '/api',
-  globalPrefixExclusions: ['/health', '/metrics']
-});
-
-@Controller('/users')     // → /api/users
-@Controller('/health')    // → /health (excluded)
 ```
 
 ## ORM — Entity Accessor API
 
-After `db.register(Entity)` and `velo.listen()`, each entity is accessible as `db.EntityName`:
-
 ```typescript
-// Read
 await db.User.findAll();
 await db.User.findById(1);
 await db.User.findOne({ email: 'alice@example.com' });
-await db.User.findMany({ age: 25 });
-await db.User.count({ age: 25 });
-
-// Write
 await db.User.create({ name: 'Alice', email: 'alice@example.com' });
 await db.User.update(1, { name: 'Bob' });
 await db.User.delete(1);
-await db.User.deleteWhere({ age: 0 });
-
-// Raw query builder
+await db.User.count({ age: 25 });
 await db.User.query().select('name').where('age > ?', 18).orderBy('name').execute();
 ```
 
@@ -297,26 +258,23 @@ await db.User.query().select('name').where('age > ?', 18).orderBy('name').execut
 
 ```
 src/
-  index.ts              — Public API exports
-  core/
-    application.ts      — HTTP server, registration, request pipeline
-    container.ts        — DI container (parent/child, singleton, cycle detection)
-  decorators/           — @Controller, @Get/@Post/..., @Service, @UseMiddleware, @UseInterceptor
-  orm/
-    database.ts         — Database class + DB() factory
-    entity-accessor.ts  — Prisma-like CRUD (findAll, create, update, delete, ...)
-    connection.ts       — Multi-DB connection (SQLite, PostgreSQL, MySQL)
-    query-builder.ts    — SQL query builder
-    decorators.ts       — @Entity, @Column, @PrimaryKey
-  middleware/            — Built-in CORS, rate limiting, security headers
-  interceptors/         — TransformInterceptor (response wrapping)
-  validation/           — Joi-based validation + @Validate decorator
-  logging/              — Winston-based structured logging
-  config/               — Application configuration
-  testing/              — Test utilities
+  core/application.ts    — HTTP server, registration, static serving, request pipeline
+  core/container.ts      — DI container (parent/child, singleton, cycle detection)
+  config/envelocity.ts   — Envelocity runtime (env tree builder, Proxy, OrThrow)
+  decorators/            — @Controller, @Get/@Post, @Service, @UseMiddleware, @UseInterceptor
+  orm/                   — Database, EntityAccessor, QueryBuilder, Connection, decorators
+  middleware/            — CORS, rate limiting, security headers
+  validation/            — Joi-based validation + @Validate
+  logging/               — Winston-based structured logging
 scripts/
-  sync.js               — Symlinks dist/ to node_modules/@velocity/framework
-  velogen.js            — Type generator for DB instances
+  sync.js                — Symlinks dist/ to node_modules/@velocity/framework
+  velogen.js             — DB type generator
+  envgen.js              — Envelocity config generator
+  apitester.js           — API tester UI generator
 examples/
-  full-demo/            — Complete example with all features
+  full-demo/             — Complete example with all features
+    velo.ts, db.ts, main.ts
+    src/controllers/, src/entities/, src/services/
+    velo/                — Generated files (types, envelocity, apitester)
+    public/              — Static HTML
 ```

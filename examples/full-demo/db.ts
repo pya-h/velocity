@@ -9,6 +9,6 @@ import type { TypedDb } from './velo/velocity-types';
 
 export const db = DB({
   type: 'sqlite',
-  database: ':memory:',
-  filename: ':memory:'
+  database: ':persistent:',
+  filename: 'db.sqlite'
 }) as TypedDb;

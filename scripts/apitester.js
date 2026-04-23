@@ -1,0 +1,469 @@
+#!/usr/bin/env node
+/**
+ * apitester — Velocity API Tester Generator
+ *
+ * Scans controller files, extracts routes, validation schemas, and auth requirements,
+ * then generates an interactive HTML testing UI served at /apitester.
+ *
+ * Usage:  npm run apitester -- examples/full-demo
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+// ─── Args ───
+const targetDir = process.argv[2];
+if (!targetDir) { console.error('Usage: apitester <project-directory>'); process.exit(1); }
+const projectDir = path.resolve(targetDir);
+
+// ─── File discovery ───
+function findFiles(dir, pattern) {
+  const results = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory() && !['node_modules', 'velo', 'dist', 'public'].includes(entry.name)) {
+      results.push(...findFiles(full, pattern));
+    } else if (entry.isFile() && pattern.test(entry.name)) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+// ─── Detect globalPrefix ───
+function detectGlobalPrefix() {
+  for (const name of ['velo.ts', 'app.ts']) {
+    const fp = path.join(projectDir, name);
+    if (fs.existsSync(fp)) {
+      const content = fs.readFileSync(fp, 'utf-8');
+      const m = content.match(/globalPrefix\s*:\s*['"]([^'"]+)['"]/);
+      if (m) return m[1];
+    }
+  }
+  return '';
+}
+
+// ─── Parse Joi schema fields ───
+function parseJoiFields(schemaStr) {
+  const fields = [];
+  const re = /(\w+)\s*:\s*Joi\.([\w\s().,'":]+?)(?=,\s*\w+\s*:|$)/gs;
+  let m;
+  while ((m = re.exec(schemaStr)) !== null) {
+    const name = m[1];
+    const chain = m[2];
+    let type = 'string';
+    if (chain.startsWith('number')) type = 'number';
+    if (chain.startsWith('boolean')) type = 'boolean';
+    if (chain.includes('.email(')) type = 'email';
+    if (chain.includes('.integer(')) type = 'integer';
+    const required = chain.includes('required()');
+    const minM = chain.match(/\.min\((\d+)\)/);
+    const maxM = chain.match(/\.max\((\d+)\)/);
+    fields.push({ name, type, required, min: minM ? +minM[1] : undefined, max: maxM ? +maxM[1] : undefined });
+  }
+  return fields.length > 0 ? fields : null;
+}
+
+// ─── Parse a controller file ───
+function parseController(filePath) {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const ctrlM = content.match(/@Controller\s*\(\s*['"]([^'"]*)['"]\s*\)/);
+  if (!ctrlM) return null;
+  const basePath = ctrlM[1];
+  const classM = content.match(/class\s+(\w+)/);
+  const className = classM ? classM[1] : 'Unknown';
+
+  // Parse schemas
+  const schemas = {};
+  const schemaRe = /const\s+(\w+)\s*=\s*Validator\.createSchema\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
+  let sm;
+  while ((sm = schemaRe.exec(content)) !== null) schemas[sm[1]] = parseJoiFields(sm[2]);
+
+  // Detect import aliases: Post as HttpPost, etc.
+  const aliasMap = {};
+  const aliasRe = /(\w+)\s+as\s+(\w+)/g;
+  let am;
+  while ((am = aliasRe.exec(content)) !== null) aliasMap[am[2]] = am[1];
+
+  // Split into handler blocks (match both native and aliased decorators)
+  const routes = [];
+  const decoratorNames = ['Get','Post','Put','Delete','Patch', ...Object.keys(aliasMap).filter(k => ['Get','Post','Put','Delete','Patch'].includes(aliasMap[k]))];
+  const splitPattern = new RegExp('(?=@(?:' + decoratorNames.join('|') + ')\\s*\\()', 'g');
+  const blocks = content.split(splitPattern);
+  const matchPattern = new RegExp('@(' + decoratorNames.join('|') + ')\\s*\\(\\s*[\'"]([^\'"]*)[\'"]\\s*\\)');
+  for (const block of blocks) {
+    const rm = block.match(matchPattern);
+    if (!rm) continue;
+    let method = (aliasMap[rm[1]] || rm[1]).toUpperCase();
+    const routePath = rm[2];
+    const hasAuth = /@UseMiddleware\s*\(\s*\w*[Aa]uth/.test(block);
+    const valM = block.match(/@Validate\s*\(\s*(\w+)\s*\)/);
+    const fields = valM && schemas[valM[1]] ? schemas[valM[1]] : null;
+    const params = (routePath.match(/:(\w+)/g) || []).map(p => p.slice(1));
+    const handlerM = block.match(/async\s+(\w+)/);
+    routes.push({
+      method, path: routePath, handler: handlerM ? handlerM[1] : '?',
+      auth: hasAuth, fields, params
+    });
+  }
+
+  return routes.length > 0 ? { className, basePath, routes } : null;
+}
+
+// ─── Sample data ───
+function sampleValue(f) {
+  switch (f.type) {
+    case 'email': return `user@example.com`;
+    case 'number': case 'integer': return f.min && f.max ? Math.floor((f.min + f.max) / 2) : 25;
+    case 'boolean': return true;
+    default: return `Sample ${f.name}`;
+  }
+}
+
+// ─── Main ───
+const prefix = detectGlobalPrefix();
+const controllerFiles = findFiles(projectDir, /\.controller\.ts$/);
+const controllers = controllerFiles.map(parseController).filter(Boolean);
+
+if (controllers.length === 0) { console.log('No controllers found.'); process.exit(0); }
+
+// Build flat endpoint list for the HTML
+const endpoints = [];
+for (const ctrl of controllers) {
+  for (const r of ctrl.routes) {
+    const fullPath = (prefix ? prefix : '') + ctrl.basePath + r.path;
+    const sample = r.fields ? Object.fromEntries(r.fields.map(f => [f.name, sampleValue(f)])) : null;
+    endpoints.push({
+      controller: ctrl.className.replace('Controller', ''),
+      method: r.method,
+      path: fullPath.replace(/\/+$/, '') || '/',
+      auth: r.auth,
+      body: sample,
+      params: r.params,
+      fields: r.fields,
+    });
+  }
+}
+
+// ─── HTML Generation ───
+const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velocity API Tester</title>
+<style>
+:root {
+  --bg-0: #0d1117; --bg-1: #161b22; --bg-2: #21262d; --bg-3: #30363d;
+  --tx-0: #c9d1d9; --tx-1: #8b949e; --tx-2: #484f58;
+  --accent: #7c5cfc; --accent-hover: #6a4ae0;
+  --green: #3fb950; --blue: #58a6ff; --red: #f85149; --orange: #d29922; --yellow: #e3b341;
+  --green-bg: #0d2818; --blue-bg: #0d1d33; --red-bg: #2d0b0d; --orange-bg: #2d1b00;
+  --radius: 6px; --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+}
+[data-theme="light"] {
+  --bg-0: #ffffff; --bg-1: #f6f8fa; --bg-2: #eaeef2; --bg-3: #d0d7de;
+  --tx-0: #1f2328; --tx-1: #656d76; --tx-2: #8b949e;
+  --accent: #5b3fcc; --accent-hover: #4a32a8;
+  --green: #1a7f37; --blue: #0969da; --red: #cf222e; --orange: #9a6700; --yellow: #7d5600;
+  --green-bg: #dafbe1; --blue-bg: #ddf4ff; --red-bg: #ffebe9; --orange-bg: #fff8c5;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg-0); color:var(--tx-0); display:flex; flex-direction:column; height:100vh; }
+
+/* Header */
+header { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; background:var(--bg-1); border-bottom:1px solid var(--bg-3); flex-shrink:0; }
+header .logo { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
+header .logo span { color:var(--accent); }
+header .controls { display:flex; align-items:center; gap:12px; }
+.toggle { padding:4px 10px; border-radius:var(--radius); border:1px solid var(--bg-3); background:var(--bg-2); color:var(--tx-0); cursor:pointer; font-size:12px; }
+.toggle:hover { border-color:var(--accent); }
+.toggle.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.auth-token { background:var(--bg-2); border:1px solid var(--bg-3); color:var(--tx-0); padding:4px 8px; border-radius:var(--radius); font-family:var(--mono); font-size:12px; width:200px; }
+
+/* Layout */
+.content { display:flex; flex:1; overflow:hidden; }
+
+/* Sidebar */
+.sidebar { width:260px; background:var(--bg-1); border-right:1px solid var(--bg-3); overflow-y:auto; flex-shrink:0; }
+.group-label { padding:10px 14px 4px; font-size:11px; font-weight:600; color:var(--tx-1); text-transform:uppercase; letter-spacing:.8px; }
+.ep { padding:7px 14px; cursor:pointer; display:flex; align-items:center; gap:8px; border-left:3px solid transparent; }
+.ep:hover { background:var(--bg-2); }
+.ep.active { background:var(--bg-2); border-left-color:var(--accent); }
+.badge { font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; min-width:36px; text-align:center; font-family:var(--mono); }
+.badge.GET { background:var(--green-bg); color:var(--green); }
+.badge.POST { background:var(--blue-bg); color:var(--blue); }
+.badge.DELETE { background:var(--red-bg); color:var(--red); }
+.badge.PUT,.badge.PATCH { background:var(--orange-bg); color:var(--orange); }
+.ep .ep-path { font-size:13px; color:var(--tx-0); font-family:var(--mono); }
+.ep .ep-auth { font-size:10px; color:var(--orange); margin-left:auto; }
+
+/* Main */
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+/* Request */
+.req-panel { padding:14px 18px; background:var(--bg-1); border-bottom:1px solid var(--bg-3); flex-shrink:0; }
+.req-bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.req-method { font-weight:700; font-size:13px; padding:6px 10px; border-radius:var(--radius); font-family:var(--mono); border:1px solid var(--bg-3); background:var(--bg-2); color:var(--tx-0); }
+.req-url { flex:1; padding:6px 10px; border-radius:var(--radius); border:1px solid var(--bg-3); background:var(--bg-0); color:var(--tx-0); font-family:var(--mono); font-size:13px; }
+.btn-send { padding:6px 18px; border:none; border-radius:var(--radius); background:var(--accent); color:#fff; font-weight:600; font-size:13px; cursor:pointer; }
+.btn-send:hover { background:var(--accent-hover); }
+.body-editor { width:100%; min-height:70px; padding:8px; border-radius:var(--radius); border:1px solid var(--bg-3); background:var(--bg-0); color:var(--tx-0); font-family:var(--mono); font-size:13px; resize:vertical; }
+.body-row { display:none; }
+.body-row.visible { display:block; }
+.field-hints { font-size:11px; color:var(--tx-1); margin-top:4px; }
+.field-hints b { color:var(--tx-0); }
+
+/* Response */
+.res-panel { flex:1; overflow-y:auto; padding:14px 18px; }
+.res-meta { display:flex; gap:12px; align-items:center; margin-bottom:10px; font-size:13px; }
+.res-meta .status { padding:3px 8px; border-radius:var(--radius); font-weight:600; font-family:var(--mono); }
+.res-meta .time { color:var(--accent); font-family:var(--mono); }
+.res-meta .size { color:var(--tx-1); font-family:var(--mono); }
+.res-body { background:var(--bg-1); border:1px solid var(--bg-3); border-radius:var(--radius); padding:12px; font-family:var(--mono); font-size:13px; white-space:pre-wrap; word-break:break-word; max-height:55vh; overflow-y:auto; line-height:1.5; }
+
+/* Log */
+.log-panel { height:180px; background:var(--bg-1); border-top:1px solid var(--bg-3); overflow-y:auto; flex-shrink:0; }
+.log-header { padding:6px 14px; font-size:12px; color:var(--tx-1); font-weight:600; border-bottom:1px solid var(--bg-3); position:sticky; top:0; background:var(--bg-1); display:flex; justify-content:space-between; align-items:center; z-index:1; }
+.log-header button { background:none; border:1px solid var(--bg-3); color:var(--tx-1); padding:2px 8px; border-radius:var(--radius); cursor:pointer; font-size:11px; }
+.log-entry { display:grid; grid-template-columns:70px 44px 1fr 40px 70px 60px; gap:6px; padding:3px 14px; font-family:var(--mono); font-size:12px; border-bottom:1px solid var(--bg-2); align-items:center; }
+.log-entry:hover { background:var(--bg-2); }
+
+/* Stats bar */
+.stats { padding:4px 14px; font-size:11px; color:var(--tx-1); background:var(--bg-1); border-top:1px solid var(--bg-3); display:flex; gap:16px; flex-shrink:0; }
+.stats b { color:var(--tx-0); }
+
+.hidden { display:none!important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span>&#9889;</span> Velocity API Tester</div>
+  <div class="controls">
+    <input class="auth-token" id="authToken" placeholder="Bearer token..." />
+    <button class="toggle" id="btnAuth" title="Toggle auth header">Auth: OFF</button>
+    <button class="toggle" id="btnTheme" title="Toggle theme">Dark</button>
+  </div>
+</header>
+
+<div class="content">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="req-panel">
+      <div class="req-bar">
+        <span class="req-method" id="reqMethod">GET</span>
+        <input class="req-url" id="reqUrl" />
+        <button class="btn-send" id="btnSend">Send</button>
+      </div>
+      <div class="body-row" id="bodyRow">
+        <textarea class="body-editor" id="reqBody"></textarea>
+        <div class="field-hints" id="fieldHints"></div>
+      </div>
+    </div>
+    <div class="res-panel">
+      <div class="res-meta" id="resMeta"></div>
+      <div class="res-body" id="resBody">Select an endpoint and click Send.</div>
+    </div>
+    <div class="log-panel">
+      <div class="log-header">Performance Log <span id="logCount"></span><button onclick="clearLog()">Clear</button></div>
+      <div id="log"></div>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+</div>
+
+<script>
+const ENDPOINTS = ${JSON.stringify(endpoints, null, 2)};
+
+// ─── State ───
+let activeIdx = -1;
+let authOn = false;
+const logEntries = [];
+const perfMap = {};
+
+// ─── Init ───
+const theme = localStorage.getItem('velo-theme') || 'dark';
+document.documentElement.dataset.theme = theme;
+document.getElementById('btnTheme').textContent = theme === 'dark' ? 'Dark' : 'Light';
+
+const savedToken = localStorage.getItem('velo-auth-token') || 'Bearer demo';
+document.getElementById('authToken').value = savedToken;
+
+// ─── Sidebar ───
+const sidebar = document.getElementById('sidebar');
+let currentGroup = '';
+ENDPOINTS.forEach((ep, i) => {
+  if (ep.controller !== currentGroup) {
+    currentGroup = ep.controller;
+    const lbl = document.createElement('div');
+    lbl.className = 'group-label';
+    lbl.textContent = currentGroup;
+    sidebar.appendChild(lbl);
+  }
+  const div = document.createElement('div');
+  div.className = 'ep';
+  div.dataset.idx = i;
+  div.innerHTML = '<span class="badge ' + ep.method + '">' + ep.method + '</span>' +
+    '<span class="ep-path">' + ep.path + '</span>' +
+    (ep.auth ? '<span class="ep-auth">AUTH</span>' : '');
+  div.onclick = () => selectEp(i);
+  sidebar.appendChild(div);
+});
+
+function selectEp(i) {
+  activeIdx = i;
+  const ep = ENDPOINTS[i];
+  document.querySelectorAll('.ep').forEach(el => el.classList.toggle('active', +el.dataset.idx === i));
+  document.getElementById('reqMethod').textContent = ep.method;
+  document.getElementById('reqMethod').className = 'req-method badge ' + ep.method;
+  let url = ep.path;
+  ep.params.forEach(p => { url = url.replace(':' + p, '1'); });
+  document.getElementById('reqUrl').value = url;
+
+  const bodyRow = document.getElementById('bodyRow');
+  const hints = document.getElementById('fieldHints');
+  if (ep.body && ['POST','PUT','PATCH'].includes(ep.method)) {
+    bodyRow.classList.add('visible');
+    document.getElementById('reqBody').value = JSON.stringify(ep.body, null, 2);
+    if (ep.fields) {
+      hints.innerHTML = ep.fields.map(f =>
+        '<b>' + f.name + '</b>: ' + f.type + (f.required ? ' (required)' : '') +
+        (f.min !== undefined ? ' min=' + f.min : '') + (f.max !== undefined ? ' max=' + f.max : '')
+      ).join(' &middot; ');
+    } else { hints.innerHTML = ''; }
+  } else {
+    bodyRow.classList.remove('visible');
+    document.getElementById('reqBody').value = '';
+    hints.innerHTML = '';
+  }
+
+  // Auto-enable auth for protected endpoints
+  if (ep.auth && !authOn) toggleAuth();
+}
+
+// ─── Auth ───
+function toggleAuth() {
+  authOn = !authOn;
+  const btn = document.getElementById('btnAuth');
+  btn.textContent = authOn ? 'Auth: ON' : 'Auth: OFF';
+  btn.classList.toggle('active', authOn);
+}
+document.getElementById('btnAuth').onclick = toggleAuth;
+document.getElementById('authToken').addEventListener('input', e => {
+  localStorage.setItem('velo-auth-token', e.target.value);
+});
+
+// ─── Theme ───
+document.getElementById('btnTheme').onclick = () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  document.getElementById('btnTheme').textContent = next === 'dark' ? 'Dark' : 'Light';
+  localStorage.setItem('velo-theme', next);
+};
+
+// ─── Send ───
+document.getElementById('btnSend').onclick = sendRequest;
+document.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key === 'Enter') sendRequest(); });
+
+async function sendRequest() {
+  const ep = activeIdx >= 0 ? ENDPOINTS[activeIdx] : null;
+  const method = document.getElementById('reqMethod').textContent;
+  const url = document.getElementById('reqUrl').value;
+  const bodyStr = document.getElementById('reqBody').value;
+  const token = document.getElementById('authToken').value;
+
+  const headers = {};
+  if (authOn && token) headers['Authorization'] = token;
+
+  const opts = { method, headers };
+  if (bodyStr && ['POST','PUT','PATCH'].includes(method)) {
+    headers['Content-Type'] = 'application/json';
+    opts.body = bodyStr;
+  }
+
+  document.getElementById('resBody').textContent = 'Loading...';
+  document.getElementById('resMeta').innerHTML = '';
+
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, opts);
+    const dur = performance.now() - t0;
+    const text = await res.text();
+    const size = new Blob([text]).size;
+    let display = text;
+    try { display = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+
+    const cls = res.status < 300 ? 'green' : res.status < 400 ? 'orange' : 'red';
+    document.getElementById('resMeta').innerHTML =
+      '<span class="status" style="background:var(--' + cls + '-bg);color:var(--' + cls + ')">' + res.status + ' ' + res.statusText + '</span>' +
+      '<span class="time">' + dur.toFixed(1) + ' ms</span>' +
+      '<span class="size">' + fmtBytes(size) + '</span>';
+    document.getElementById('resBody').textContent = display;
+    addLog(method, url, res.status, dur, size);
+  } catch (err) {
+    const dur = performance.now() - t0;
+    document.getElementById('resMeta').innerHTML = '<span class="status" style="background:var(--red-bg);color:var(--red)">Error</span><span class="time">' + dur.toFixed(1) + ' ms</span>';
+    document.getElementById('resBody').textContent = err.message;
+    addLog(method, url, 0, dur, 0);
+  }
+}
+
+// ─── Log ───
+function addLog(method, path, status, dur, size) {
+  logEntries.push({ method, path, status, dur, size, time: new Date() });
+  const key = method + ' ' + path;
+  if (!perfMap[key]) perfMap[key] = { count: 0, total: 0, min: Infinity, max: 0 };
+  const p = perfMap[key];
+  p.count++; p.total += dur; p.min = Math.min(p.min, dur); p.max = Math.max(p.max, dur);
+
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  const mColor = method === 'GET' ? 'var(--green)' : method === 'POST' ? 'var(--blue)' : 'var(--red)';
+  const sColor = status < 300 ? 'var(--green)' : status < 400 ? 'var(--orange)' : 'var(--red)';
+  const dColor = dur < 50 ? 'var(--green)' : dur < 200 ? 'var(--orange)' : 'var(--red)';
+  el.innerHTML =
+    '<span style="color:var(--tx-2)">' + new Date().toLocaleTimeString() + '</span>' +
+    '<span style="color:' + mColor + ';font-weight:700">' + method + '</span>' +
+    '<span>' + path + '</span>' +
+    '<span style="color:' + sColor + '">' + (status || 'ERR') + '</span>' +
+    '<span style="color:' + dColor + ';text-align:right">' + dur.toFixed(1) + ' ms</span>' +
+    '<span style="color:var(--tx-1);text-align:right">' + fmtBytes(size) + '</span>';
+  log.prepend(el);
+  document.getElementById('logCount').textContent = logEntries.length + ' requests';
+  updateStats();
+}
+function clearLog() { logEntries.length = 0; Object.keys(perfMap).forEach(k => delete perfMap[k]); document.getElementById('log').innerHTML = ''; document.getElementById('logCount').textContent = ''; updateStats(); }
+function updateStats() {
+  const total = logEntries.length;
+  if (!total) { document.getElementById('stats').innerHTML = ''; return; }
+  const allDur = logEntries.map(l => l.dur);
+  const avg = allDur.reduce((a,b) => a+b, 0) / total;
+  const min = Math.min(...allDur);
+  const max = Math.max(...allDur);
+  document.getElementById('stats').innerHTML =
+    'Requests: <b>' + total + '</b> &middot; Avg: <b>' + avg.toFixed(1) + ' ms</b> &middot; Min: <b>' + min.toFixed(1) + ' ms</b> &middot; Max: <b>' + max.toFixed(1) + ' ms</b>';
+}
+
+function fmtBytes(b) { return b < 1024 ? b + ' B' : (b/1024).toFixed(1) + ' KB'; }
+
+// Select first endpoint
+if (ENDPOINTS.length > 0) selectEp(0);
+</script>
+</body>
+</html>`;
+
+// ─── Write output ───
+const outputDir = path.join(projectDir, 'velo');
+fs.mkdirSync(outputDir, { recursive: true });
+const outputFile = path.join(outputDir, 'apitester.html');
+fs.writeFileSync(outputFile, html);
+
+console.log(`apitester: generated ${path.relative(process.cwd(), outputFile)}`);
+console.log(`  ${controllers.length} controllers, ${endpoints.length} endpoints`);
+controllers.forEach(c => {
+  console.log(`  ${c.className}: ${c.routes.map(r => r.method + ' ' + r.path).join(', ')}`);
+});
+console.log(`\n  Add to your main.ts or velo.ts:`);
+console.log(`    velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));`);

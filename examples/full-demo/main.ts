@@ -15,7 +15,6 @@
  *   curl localhost:5000/api/posts
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 import { velo } from './velo';
 import { db } from './db';
@@ -33,41 +32,9 @@ import './src/controllers/user.controller';
 import './src/controllers/post.controller';
 
 async function main() {
-  // Serve the API tester UI at /
-  const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf-8');
-  const server = (velo as any).server as import('http').Server;
-  const originalListeners = server.listeners('request').slice();
-  server.removeAllListeners('request');
-  server.on('request', (req, res) => {
-    // CORS headers for API tester
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));
 
-    if (req.url === '/' || req.url === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(html);
-      return;
-    }
-    if (req.url === '/favicon.ico') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-    // Delegate to Velocity
-    for (const listener of originalListeners) (listener as any)(req, res);
-  });
-
-  // Start the server (processes registrations, initializes DB, begins listening)
   await velo.listen();
-
-  // Seed sample data after DB is ready
-  await db.User.create({ name: 'John Doe', email: 'john@example.com', age: 30, createdAt: new Date().toISOString() });
-  await db.User.create({ name: 'Jane Smith', email: 'jane@example.com', age: 25, createdAt: new Date().toISOString() });
-  await db.Post.create({ title: 'Hello World', content: 'First post!', author: 'John Doe', createdAt: new Date().toISOString() });
-
-  console.log('Seeded sample data: 2 users, 1 post');
 }
 
 main().catch(console.error);

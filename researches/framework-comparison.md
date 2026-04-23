@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-22
+> Comparison date: 2026-04-23 (updated)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -61,9 +61,7 @@ Velocity's higher idle memory vs Express/Fastify comes from loading 3 database d
 | Multi-runtime | Hono (10+ runtimes) | Node.js only |
 | OpenAPI/Swagger gen | NestJS, Fastify, Elysia | Not implemented |
 | Guards/Pipes | NestJS | Middleware + interceptors cover most cases |
-| Static file serving | Express, Fastify, Hono | Not implemented |
 | Cookie/session | Express, NestJS, Fastify | Not implemented |
-| CORS/Helmet (real) | Express, Fastify | Velocity has the classes but they're lightweight stubs |
 
 ## Where Velocity Wins
 
@@ -71,6 +69,9 @@ Velocity's higher idle memory vs Express/Fastify comes from loading 3 database d
 - **Batteries-included ORM**: No need to install, configure, and wire up Prisma/TypeORM separately.
 - **DI without module boilerplate**: NestJS requires `@Module({ imports, controllers, providers })` for every feature. Velocity: just `velo.register(X)`.
 - **Type-safe env config**: Envelocity generates types from `.env` — zero runtime cost for type safety, OrThrow without function calls.
+- **Built-in API tester**: `npm run apitester` generates an interactive testing UI from decorators — no Postman, no Swagger setup, no external tools. No other framework does this.
+- **Static file serving**: `velo.serve()` and `velo.static()` — single files or directories, with MIME detection and path traversal protection.
+- **Config-based CORS**: Set `cors: { origin: '*' }` in config — automatic `Access-Control-*` headers and OPTIONS handling. No middleware to install.
 
 ## Where Velocity Loses
 

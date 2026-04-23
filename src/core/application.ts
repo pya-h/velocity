@@ -1,4 +1,6 @@
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
+import * as fs from 'fs';
+import * as fsPath from 'path';
 import { Container } from './container';
 import { Logger } from '../logging/logger';
 import { Config } from '../config/config';
@@ -36,6 +38,10 @@ export class VelocityApplication {
 
   // Track controller class → mounted path for resolveControllerPath
   private controllerPaths = new Map<any, string>();
+
+  // Static file mounts
+  private fileMounts = new Map<string, string>();      // urlPath → absolute file path
+  private dirMounts: { prefix: string; dir: string }[] = [];
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -101,6 +107,56 @@ export class VelocityApplication {
     }
 
     return this;
+  }
+
+  // ─── Static file serving ───
+
+  /** Serve a single file at a URL path. */
+  public serve(urlPath: string, filePath: string): this {
+    this.fileMounts.set(urlPath, fsPath.isAbsolute(filePath) ? filePath : fsPath.resolve(filePath));
+    return this;
+  }
+
+  /** Serve a directory of files under a URL prefix. */
+  public static(urlPrefix: string, directory: string): this {
+    const dir = fsPath.isAbsolute(directory) ? directory : fsPath.resolve(directory);
+    this.dirMounts.push({ prefix: urlPrefix.endsWith('/') ? urlPrefix : urlPrefix + '/', dir });
+    return this;
+  }
+
+  private tryServeStatic(pathname: string, res: ServerResponse): boolean {
+    // Single file mounts
+    const filePath = this.fileMounts.get(pathname);
+    if (filePath) {
+      if (fs.existsSync(filePath)) { this.sendFile(filePath, res); return true; }
+    }
+
+    // Directory mounts
+    for (const mount of this.dirMounts) {
+      if (pathname.startsWith(mount.prefix)) {
+        const relative = pathname.slice(mount.prefix.length) || 'index.html';
+        const resolved = fsPath.resolve(mount.dir, relative);
+        // Path traversal guard
+        if (!resolved.startsWith(mount.dir)) return false;
+        if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+          this.sendFile(resolved, res);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static MIME: Record<string, string> = {
+    '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
+    '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain',
+  };
+
+  private sendFile(filePath: string, res: ServerResponse): void {
+    const mime = VelocityApplication.MIME[fsPath.extname(filePath).toLowerCase()] || 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': mime });
+    fs.createReadStream(filePath).pipe(res);
   }
 
   // ─── Internal registration (called at listen() time) ───
@@ -371,6 +427,20 @@ export class VelocityApplication {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       const pathname = url.pathname;
       const method = req.method?.toUpperCase() || 'GET';
+
+      // CORS
+      const corsConfig = this.config.get('cors');
+      if (corsConfig) {
+        const origin = Array.isArray(corsConfig.origin) ? corsConfig.origin.join(',') : corsConfig.origin;
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+        if (corsConfig.credentials) res.setHeader('Access-Control-Allow-Credentials', 'true');
+        if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      }
+
+      // Static files (before body parsing for efficiency)
+      if (method === 'GET' && this.tryServeStatic(pathname, res)) return;
 
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
         velocityReq.body = await this.parseBody(req);
