@@ -157,7 +157,7 @@ if (keys.length === 0) {
 const tree = buildTree(envVars);
 
 // Generate output
-const outputDir = path.join(projectDir, 'generated');
+const outputDir = path.join(projectDir, 'velo');
 fs.mkdirSync(outputDir, { recursive: true });
 
 const outputFile = path.join(outputDir, 'envelocity.ts');

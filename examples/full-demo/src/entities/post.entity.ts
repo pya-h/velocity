@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryKey } from '@velocity/framework';
-import { db } from '../db';
+import { db } from '../../db';
 
 @Entity('posts')
 export class Post {

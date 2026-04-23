@@ -1,5 +1,5 @@
 import { Controller, Get, VelocityRequest, VelocityResponse } from '@velocity/framework';
-import { velo } from '../velo';
+import { velo } from '../../velo';
 
 @Controller('/health')
 class HealthController {

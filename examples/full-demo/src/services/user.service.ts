@@ -1,6 +1,6 @@
 import { Service } from '@velocity/framework';
-import { db } from '../db';
-import { velo } from '../velo';
+import { db } from '../../db';
+import { velo } from '../../velo';
 
 @Service()
 export class UserService {

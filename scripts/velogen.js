@@ -15,7 +15,7 @@
  *   3. Generates a velocity-types.d.ts with typed DB interfaces
  *
  * After running, update your db.ts to use the generated type:
- *   import type { TypedDb } from './generated/velocity-types';
+ *   import type { TypedDb } from './velo/velocity-types';
  *   export const db = DB({ ... }) as TypedDb;
  */
 
@@ -42,7 +42,7 @@ function findFiles(dir, pattern) {
   const results = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'generated') {
+    if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'velo') {
       results.push(...findFiles(fullPath, pattern));
     } else if (entry.isFile() && pattern.test(entry.name)) {
       results.push(fullPath);
@@ -96,7 +96,7 @@ for (const entity of entities) {
 
 // ─── Generate output ───
 
-const outputDir = path.join(projectDir, 'generated');
+const outputDir = path.join(projectDir, 'velo');
 fs.mkdirSync(outputDir, { recursive: true });
 
 const outputFile = path.join(outputDir, 'velocity-types.d.ts');
