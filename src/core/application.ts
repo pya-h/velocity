@@ -128,20 +128,24 @@ export class VelocityApplication {
     // Single file mounts
     const filePath = this.fileMounts.get(pathname);
     if (filePath) {
-      if (fs.existsSync(filePath)) { this.sendFile(filePath, res); return true; }
+      try { if (fs.existsSync(filePath)) { this.sendFile(filePath, res); return true; } }
+      catch { /* file gone or permission denied */ }
     }
 
     // Directory mounts
     for (const mount of this.dirMounts) {
       if (pathname.startsWith(mount.prefix)) {
         const relative = pathname.slice(mount.prefix.length) || 'index.html';
+        // Reject obvious traversal attempts before touching the filesystem
+        if (relative.includes('\0') || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(relative)) return false;
         const resolved = fsPath.resolve(mount.dir, relative);
-        // Path traversal guard
-        if (!resolved.startsWith(mount.dir)) return false;
-        if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
-          this.sendFile(resolved, res);
-          return true;
-        }
+        // Resolved path must stay within the mount directory (handles symlinks via realpath)
+        try {
+          const realDir = fs.realpathSync(mount.dir);
+          const realFile = fs.realpathSync(resolved);
+          if (!realFile.startsWith(realDir + fsPath.sep) && realFile !== realDir) return false;
+          if (fs.statSync(realFile).isFile()) { this.sendFile(realFile, res); return true; }
+        } catch { /* file not found or permission denied */ }
       }
     }
     return false;
@@ -150,13 +154,19 @@ export class VelocityApplication {
   private static MIME: Record<string, string> = {
     '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
     '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
     '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain',
+    '.pdf': 'application/pdf', '.xml': 'application/xml',
+    '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+    '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
   };
 
   private sendFile(filePath: string, res: ServerResponse): void {
     const mime = VelocityApplication.MIME[fsPath.extname(filePath).toLowerCase()] || 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': mime });
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
+    stream.pipe(res);
   }
 
   // ─── Internal registration (called at listen() time) ───
@@ -431,8 +441,16 @@ export class VelocityApplication {
       // CORS
       const corsConfig = this.config.get('cors');
       if (corsConfig) {
-        const origin = Array.isArray(corsConfig.origin) ? corsConfig.origin.join(',') : corsConfig.origin;
-        res.setHeader('Access-Control-Allow-Origin', origin);
+        let allowedOrigin: string;
+        if (Array.isArray(corsConfig.origin)) {
+          // Match request origin against whitelist; fall back to first entry
+          const reqOrigin = req.headers.origin || '';
+          allowedOrigin = corsConfig.origin.includes(reqOrigin) ? reqOrigin : corsConfig.origin[0] || '';
+          res.setHeader('Vary', 'Origin');
+        } else {
+          allowedOrigin = corsConfig.origin;
+        }
+        res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
         res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
         if (corsConfig.credentials) res.setHeader('Access-Control-Allow-Credentials', 'true');
