@@ -21,8 +21,7 @@
     "joi": "^18.0.1",
     "mysql2": "^3.14.3",
     "pg": "^8.16.3",
-    "reflect-metadata": "^0.2.2",
-    "winston": "^3.17.0"
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",

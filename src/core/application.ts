@@ -1,4 +1,6 @@
-import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
+
+const IS_BUN = typeof Bun !== 'undefined';
 import * as fs from 'fs';
 import * as fsPath from 'path';
 import { Container } from './container';
@@ -21,7 +23,7 @@ interface PendingRegistration {
 }
 
 export class VelocityApplication {
-  private server: Server;
+  private server: any;
   private container: Container;
   private logger: Logger;
   private config: Config;
@@ -48,7 +50,7 @@ export class VelocityApplication {
     this.config = new Config(config);
     this.logger = new Logger(this.config.get('logger'));
 
-    this.server = createServer((req, res) => this.handleRequest(req, res));
+    this.server = IS_BUN ? null : createServer((req, res) => this.handleRequest(req, res));
     this.setupContainer();
 
     // Register this app as the current global app so DB() auto-registers
@@ -401,6 +403,16 @@ export class VelocityApplication {
 
     this.logger.info('Application initialized successfully');
 
+    if (IS_BUN) {
+      this.server = Bun.serve({
+        port: finalPort,
+        hostname: finalHost,
+        fetch: (request: Request) => this.bunFetchHandler(request),
+      });
+      this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
+      return;
+    }
+
     return new Promise((resolve, reject) => {
       this.server.once('error', (err: NodeJS.ErrnoException) => {
         const msg = err.code === 'EADDRINUSE'
@@ -419,6 +431,12 @@ export class VelocityApplication {
     // Close all databases
     for (const db of this.databases) {
       await db.close();
+    }
+
+    if (IS_BUN) {
+      this.server?.stop(true);
+      this.logger.info('Server closed');
+      return;
     }
 
     return new Promise((resolve) => {
@@ -464,7 +482,7 @@ export class VelocityApplication {
       }
 
       // Static files (before body parsing for efficiency)
-      if (method === 'GET' && this.tryServeStatic(pathname, res)) return;
+      if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
 
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
         velocityReq.body = await this.parseBody(req);
@@ -554,6 +572,16 @@ export class VelocityApplication {
   private async parseBody(req: IncomingMessage): Promise<any> {
     const MAX_BODY_SIZE = 1024 * 1024;
 
+    // Bun path: consume the Web Request body directly
+    const bunReq: Request | undefined = (req as any).__bunNativeRequest;
+    if (bunReq) {
+      const cl = parseInt(bunReq.headers.get('content-length') || '0', 10);
+      if (cl > MAX_BODY_SIZE) throw new Error('Request body too large');
+      const ct = bunReq.headers.get('content-type') || '';
+      if (ct.includes('application/json')) return bunReq.json().catch(() => ({}));
+      return bunReq.text().catch(() => '');
+    }
+
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
       let size = 0;
@@ -626,5 +654,133 @@ export class VelocityApplication {
     }
 
     return { params };
+  }
+
+  // ─── Bun.serve() adapter ───
+
+  private async bunFetchHandler(request: Request): Promise<Response> {
+    const reqUrl = new URL(request.url);
+    const pathname = reqUrl.pathname;
+    const method = request.method.toUpperCase();
+
+    // Static files: serve directly via Bun.file() with CORS headers
+    if (method === 'GET') {
+      const staticResp = this.tryServeStaticBun(pathname, request.headers);
+      if (staticResp) return staticResp;
+    }
+
+    // All other requests: adapt to Node-compatible req/res and run through handleRequest
+    const { req, res, getResponse } = this.createBunReqRes(request, reqUrl);
+    await this.handleRequest(req, res);
+    return getResponse();
+  }
+
+  private tryServeStaticBun(pathname: string, requestHeaders: Headers): Response | null {
+    const getMime = (fp: string) =>
+      VelocityApplication.MIME[fsPath.extname(fp).toLowerCase()] || 'application/octet-stream';
+
+    const buildHeaders = (fp: string): Record<string, string> => {
+      const h: Record<string, string> = { 'Content-Type': getMime(fp) };
+      const cors = this.config.get('cors');
+      if (cors) {
+        const origin = requestHeaders.get('origin') || '';
+        const allowed = Array.isArray(cors.origin)
+          ? (cors.origin.includes(origin) ? origin : cors.origin[0] || '')
+          : cors.origin;
+        h['Access-Control-Allow-Origin'] = allowed;
+        h['Access-Control-Allow-Methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
+        h['Access-Control-Allow-Headers'] = 'Content-Type,Authorization';
+        if (cors.credentials) h['Access-Control-Allow-Credentials'] = 'true';
+        if (Array.isArray(cors.origin)) h['Vary'] = 'Origin';
+      }
+      return h;
+    };
+
+    const filePath = this.fileMounts.get(pathname);
+    if (filePath) {
+      try {
+        if (fs.existsSync(filePath)) {
+          return new Response(Bun.file(filePath), { headers: buildHeaders(filePath) });
+        }
+      } catch { /* file gone or permission denied */ }
+    }
+
+    for (const mount of this.dirMounts) {
+      if (pathname.startsWith(mount.prefix)) {
+        const relative = pathname.slice(mount.prefix.length) || 'index.html';
+        if (relative.includes('\0') || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(relative)) return null;
+        const resolved = fsPath.resolve(mount.dir, relative);
+        try {
+          const realDir = fs.realpathSync(mount.dir);
+          const realFile = fs.realpathSync(resolved);
+          if (!realFile.startsWith(realDir + fsPath.sep) && realFile !== realDir) return null;
+          if (fs.statSync(realFile).isFile()) {
+            return new Response(Bun.file(realFile), { headers: buildHeaders(realFile) });
+          }
+        } catch { /* file not found or permission denied */ }
+      }
+    }
+
+    return null;
+  }
+
+  private createBunReqRes(
+    request: Request,
+    url: URL,
+  ): { req: VelocityRequest; res: VelocityResponse; getResponse: () => Response } {
+    // Build a plain headers record (Web API Headers → Record)
+    const headers: Record<string, string | string[] | undefined> = {};
+    request.headers.forEach((value, key) => { headers[key] = value; });
+
+    const req: any = {
+      url: url.pathname + (url.search || ''),
+      method: request.method,
+      headers,
+      __bunNativeRequest: request,
+      __bunSkipStatic: true,
+    };
+
+    let _status = 200;
+    const _headers: Record<string, string> = {};
+    let _body = '';
+    let _sent = false;
+
+    const rawRes: any = {
+      get statusCode() { return _status; },
+      set statusCode(v: number) { _status = v; },
+      get headersSent() { return _sent; },
+      setHeader(name: string, value: string | number | readonly string[]) {
+        _headers[name.toLowerCase()] = Array.isArray(value)
+          ? (value as string[]).join(', ')
+          : String(value);
+      },
+      getHeader(name: string) { return _headers[name.toLowerCase()]; },
+      removeHeader(name: string) { delete _headers[name.toLowerCase()]; },
+      writeHead(code: number, hdrs?: Record<string, string | string[]>) {
+        _status = code;
+        if (hdrs) {
+          for (const [k, v] of Object.entries(hdrs)) {
+            _headers[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : v;
+          }
+        }
+        _sent = true;
+      },
+      end(data?: string) {
+        if (data !== undefined && data !== '') _body = data;
+        _sent = true;
+      },
+      // Minimal writable-stream no-ops (static files handled separately on Bun)
+      write() {},
+      on()             { return rawRes; },
+      once()           { return rawRes; },
+      emit()           { return false; },
+      removeListener() { return rawRes; },
+    };
+
+    const res = this.enhanceResponse(rawRes as ServerResponse) as VelocityResponse;
+    const getResponse = (): Response =>
+      new Response(_body || null, { status: _status, headers: _headers });
+
+    return { req: req as VelocityRequest, res, getResponse };
   }
 }

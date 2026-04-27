@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|---|
 | Runtime | Node.js / **Bun** | Node.js | Node.js | Any (Node/Bun/Edge) | Bun only | Node.js |
 | Source size | 2K lines | ~90K lines | ~15K lines | ~20K lines | ~12K lines | ~3K lines |
-| Prod deps | 5 | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
+| Prod deps | 4 | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
 | TypeScript | Native, decorators | Native, decorators | Native, no decorators | Native, no decorators | Native, no decorators | @types bolt-on |
 | DI Container | Built-in (hierarchical) | Built-in (module-scoped) | No | No | No (derive/decorate) | No |
 | Built-in ORM | Yes (Prisma-like) | No (recommends TypeORM/Prisma) | No | No | No | No |
@@ -23,8 +23,8 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 | Framework | Overhead vs raw `http.createServer` | Why |
 |---|---|---|
-| **Velocity (Bun)** | ~17% | URL parse + route match + response wrapping (measured: 14,142 vs 17,027 req/sec) |
-| **Velocity (Node.js)** | ~15% | Same overhead, slower absolute numbers (5,070 vs 5,990 req/sec) |
+| **Velocity (Bun.serve())** | ~13% at c=200 | Adapter layer + route scan + response wrapping (15,522 vs 17,818 req/sec) |
+| **Velocity (node:http / Node.js)** | ~15% | Same overhead, slower absolute (5,070 vs 5,990 req/sec) |
 | **Fastify** | ~10-15% | Highly optimized find-my-way router, schema compilation |
 | **Express** | ~40-50% | Regex-based routing, middleware chain per request |
 | **NestJS (Express)** | ~60-80% | Express overhead + DI resolution + guards/pipes/interceptors |
@@ -36,12 +36,14 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 | Framework | Idle RSS (small app) |
 |---|---|
-| **Velocity (Bun)** | ~79 MB (measured: Bun runtime + bun:sqlite loaded; pg/mysql2 lazily skipped) |
-| **Express** | ~62 MB |
-| **Fastify** | ~45 MB |
-| **NestJS** | ~89 MB |
-| **Hono (Node)** | ~50 MB |
-| **Elysia (Bun)** | ~15 MB (Bun runtime) |
+| **Velocity (Bun, no DB)** | ~75 MB (measured: Bun + winston + joi + reflect-metadata only) |
+| **Velocity (Bun, SQLite)** | ~79 MB (measured: same + bun:sqlite built-in; pg/mysql2 never loaded) |
+| **Raw Bun `node:http`** | ~46 MB (baseline — no framework, no deps) |
+| **Express** | ~62 MB (Node.js) |
+| **Fastify** | ~45 MB (Node.js) |
+| **NestJS** | ~89 MB (Node.js) |
+| **Hono (Node)** | ~50 MB (Node.js) |
+| **Elysia (Bun)** | ~15 MB (Bun.serve() native, minimal deps) |
 
 Database drivers (pg, mysql2, bun:sqlite) are now **lazily loaded** via dynamic `import()` inside `connect()` — they are never imported unless the configured driver type is actually used. This means:
 
@@ -49,7 +51,9 @@ Database drivers (pg, mysql2, bun:sqlite) are now **lazily loaded** via dynamic 
 - `bun:sqlite` is a Bun built-in (no disk I/O, resolves from internal registry).
 - `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache on all subsequent calls. Since `connect()` is called once at startup, there is no per-request overhead.
 
-Idle RSS on Bun (~79 MB) is similar to the old Node.js eager-load figure (~78 MB). This is expected: lazy loading removed pg and mysql2 (~10-15 MB), but Bun's runtime has a higher baseline than Node.js (~10-15 MB more). The net effect is roughly neutral on total RSS — the real win is that pg and mysql2 are **never loaded** when only SQLite is configured, meaning those packages don't exist in the process's loaded module graph at all.
+**Fair comparison note:** other frameworks in this table ship with no DB driver and no logger. Velocity's ~75 MB no-DB figure (vs raw Bun ~46 MB) reflects winston + joi + reflect-metadata — the 3 always-on framework dependencies. The extra ~4 MB for SQLite comes from `bun:sqlite` being a Bun built-in (negligible vs a native addon). `pg` and `mysql2` are **never loaded** unless the configured type is `postgresql` or `mysql`, so they contribute nothing to RSS in a SQLite-only app.
+
+Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node's V8 at similar scale — this is why Velocity on Bun (~75 MB no-DB) doesn't look dramatically better than Express on Node (~62 MB). The throughput advantage is where Bun shows up (14,142 vs ~5,000 req/sec).
 
 ## What Velocity Has That Others Don't
 
@@ -89,7 +93,7 @@ Idle RSS on Bun (~79 MB) is similar to the old Node.js eager-load figure (~78 MB
 
 ## Bottom Line
 
-Velocity is closest in philosophy to **Fastify** (performance-focused, Node-native) but with the DX of **NestJS** (decorators, DI, structure) — without NestJS's module ceremony or dependency weight. Since the Bun migration, it runs natively on Bun with zero code changes: `bun run main.ts` works out of the box, `bun:sqlite` replaces the `better-sqlite3` native addon, and `bun test` replaces Node's test runner. On Bun it delivers **14,142 req/sec** (~17% overhead over raw `node:http` on Bun) — more than **2.8× faster** than the Node.js compiled baseline. The tradeoff is a smaller ecosystem and less production hardening.
+Velocity is closest in philosophy to **Fastify** (performance-focused, Node-native) but with the DX of **NestJS** (decorators, DI, structure) — without NestJS's module ceremony or dependency weight. Since the Bun migration, it runs natively on Bun with zero code changes: `bun run main.ts` works out of the box, `bun:sqlite` replaces the `better-sqlite3` native addon, and `bun test` replaces Node's test runner. On Bun it delivers **~15,522 req/sec** (~13% overhead over raw `Bun.serve()`) — more than **3× faster** than the Node.js compiled baseline (5,070 req/sec). The tradeoff is a smaller ecosystem and less production hardening.
 
 ## Benchmark Environment
 
@@ -100,12 +104,12 @@ Velocity is closest in philosophy to **Fastify** (performance-focused, Node-nati
 - Velocity measured: ~4,700 req/sec (via ts-node), ~5,070 req/sec (compiled)
 - Raw Node.js http baseline: ~5,990 req/sec (same environment)
 
-### Bun (current baseline)
+### Bun (current baseline — Bun.serve() native)
 - Bun v1.3.13
 - Linux 6.12.20-amd64
-- Tool: Apache Bench (`ab -n 20000 -c 100 -l`)
-- Velocity measured: **~14,142 req/sec** (`bun run main.ts`, no compilation step)
-- Raw `node:http` on Bun baseline: **~17,027 req/sec**
-- Framework overhead: **~17%**
-- Idle RSS: **~79 MB** (only `bun:sqlite` loaded; `pg` and `mysql2` never imported)
-- Note: Velocity uses `node:http` compatibility layer, not `Bun.serve()` natively — switching to `Bun.serve()` would reduce overhead further
+- Tool: Apache Bench (`ab -n 20000 -c 200 -l`)
+- Velocity measured: **~15,522 req/sec** (`bun run main.ts`, `Bun.serve()` active)
+- Raw `Bun.serve()` baseline: **~17,818 req/sec**
+- Framework overhead: **~13%** (at c=200; rises to ~33% at c=100 due to adapter layer cost)
+- Idle RSS: **~75 MB no-DB / ~79 MB with SQLite** (winston removed; pg and mysql2 never imported)
+- Main remaining overhead sources: Bun adapter req/res shim, double URL parse, linear route scan (T-04/T-05)
