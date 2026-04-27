@@ -2,13 +2,6 @@ import { DatabaseConnection } from './connection';
 import { QueryBuilder } from './query-builder';
 import { EntityMetadata } from '../types';
 
-/**
- * Prisma-like entity accessor — provides direct data access methods
- * on a per-entity basis. Created automatically when entities register
- * on a Database instance.
- *
- * Usage:  db.User.findAll(), db.User.create({ name: 'Alice' }), etc.
- */
 export class EntityAccessor<T = any> {
   private connection!: DatabaseConnection;
   private metadata: EntityMetadata;
@@ -18,7 +11,6 @@ export class EntityAccessor<T = any> {
     this.metadata = metadata;
   }
 
-  /** Called internally by Database.initialize() once the connection is live */
   _setConnection(connection: DatabaseConnection): void {
     this.connection = connection;
     this.initialized = true;
@@ -31,8 +23,6 @@ export class EntityAccessor<T = any> {
       );
     }
   }
-
-  // --------------- Read ---------------
 
   async findAll(): Promise<T[]> {
     this.ensureInitialized();
@@ -76,8 +66,6 @@ export class EntityAccessor<T = any> {
     return qb.execute();
   }
 
-  // --------------- Write ---------------
-
   async create(data: Partial<T>): Promise<T> {
     this.ensureInitialized();
     const insertBuilder = QueryBuilder.insert(this.connection);
@@ -91,7 +79,6 @@ export class EntityAccessor<T = any> {
 
     const result = await builder.execute();
 
-    // Resolve inserted ID across DB engines
     let insertedId: any;
     if (this.connection.getType() === 'postgresql' && result.rows?.length > 0) {
       insertedId = result.rows[0][this.metadata.primaryKey!];
@@ -101,7 +88,6 @@ export class EntityAccessor<T = any> {
       insertedId = result.insertId;
     }
 
-    // Return the full created record if we have a primary key
     if (this.metadata.primaryKey && insertedId !== undefined) {
       const created = await this.findById(insertedId);
       if (created) return created;
@@ -148,8 +134,6 @@ export class EntityAccessor<T = any> {
     await builder.execute();
   }
 
-  // --------------- Utility ---------------
-
   async count(conditions: Partial<T> = {}): Promise<number> {
     this.ensureInitialized();
     let qb = new QueryBuilder(this.connection)
@@ -163,13 +147,10 @@ export class EntityAccessor<T = any> {
     return rows[0]?.count ?? 0;
   }
 
-  /** Returns a raw QueryBuilder bound to this entity's table */
   query(): QueryBuilder {
     this.ensureInitialized();
     return new QueryBuilder(this.connection).from(this.metadata.tableName);
   }
-
-  // --------------- Internal ---------------
 
   private requirePrimaryKey(): void {
     if (!this.metadata.primaryKey) {
@@ -177,7 +158,6 @@ export class EntityAccessor<T = any> {
     }
   }
 
-  /** Create table in the database for this entity */
   async createTable(): Promise<void> {
     this.ensureInitialized();
     const columns = this.metadata.columns.map(col => {

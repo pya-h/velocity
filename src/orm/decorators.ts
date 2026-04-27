@@ -12,7 +12,6 @@ export function Entity(tableName?: string) {
       primaryKey: undefined
     };
 
-    // Find primary key
     const primaryKeyColumn = metadata.columns.find(col => col.primaryKey);
     if (primaryKeyColumn) {
       metadata.primaryKey = primaryKeyColumn.propertyName;

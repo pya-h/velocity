@@ -9,7 +9,6 @@ import { db } from '../../db';
 import { velo } from '../../velo';
 import * as Joi from 'joi';
 
-// --- Auth middleware (function-based) ---
 const authMiddleware: MiddlewareFunction = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) {
@@ -20,7 +19,6 @@ const authMiddleware: MiddlewareFunction = (req, res, next) => {
   next();
 };
 
-// --- Validation schema ---
 const createUserSchema = Validator.createSchema({
   name: Joi.string().required(),
   email: Joi.string().email().required(),
@@ -71,5 +69,4 @@ class UserController {
   }
 }
 
-// Self-register (globalPrefix '/api' → /api/users)
 velo.register(UserController);

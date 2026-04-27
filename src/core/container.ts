@@ -45,12 +45,10 @@ export class Container {
   }
 
   public resolve<T>(identifier: ServiceIdentifier): T {
-    // Check if instance already exists for singletons
     if (this.instances.has(identifier)) {
       return this.instances.get(identifier);
     }
 
-    // Circular dependency detection
     if (this.resolving.has(identifier)) {
       const name = typeof identifier === 'function' ? identifier.name : String(identifier);
       throw new Error(`Circular dependency detected while resolving: ${name}`);
@@ -59,12 +57,9 @@ export class Container {
     const service = this.services.get(identifier);
 
     if (!service) {
-      // Fall back to parent container
       if (this.parent) {
         return this.parent.resolve(identifier);
       }
-
-      // Try to resolve as constructor
       if (typeof identifier === 'function') {
         return this.createInstance(identifier as Constructor<T>);
       }
@@ -83,7 +78,6 @@ export class Container {
       throw new Error(`Invalid service definition for ${String(identifier)}`);
     }
 
-    // Cache singleton instances
     if (service.singleton) {
       this.instances.set(identifier, instance);
     }
@@ -92,19 +86,16 @@ export class Container {
   }
 
   private createInstance<T>(constructor: Constructor<T>): T {
-    // Track that we're resolving this constructor to detect cycles
     this.resolving.add(constructor);
 
     try {
-      // Get constructor parameter types
       const paramTypes = Reflect.getMetadata('design:paramtypes', constructor) || [];
 
-      // Resolve dependencies
       const dependencies = paramTypes.map((type: any) => {
         try {
           return this.resolve(type);
         } catch (error) {
-          // If dependency not found, try to create it
+          // Attempt to auto-create unregistered constructor dependencies
           if (typeof type === 'function' && error instanceof Error && error.message.includes('not found')) {
             return this.createInstance(type);
           }

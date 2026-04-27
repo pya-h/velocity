@@ -1,12 +1,10 @@
 import { InterceptorFunction, RouteMetadata } from '../types';
 
 const ROUTES_METADATA_KEY = Symbol.for('routes');
-const INTERCEPTOR_METADATA_KEY = Symbol.for('interceptor');
 const PENDING_INTERCEPTORS_KEY = Symbol.for('pending_interceptors');
 
-export function Interceptor(order: number = 0) {
+export function Interceptor() {
   return function <T extends { new (...args: any[]): {} }>(constructor: T) {
-    Reflect.defineMetadata(INTERCEPTOR_METADATA_KEY, { order }, constructor);
     return constructor;
   };
 }

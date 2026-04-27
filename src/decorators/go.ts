@@ -1,9 +1,7 @@
 export const GO_METADATA_KEY = Symbol.for('velocity:go');
 
-/**
- * Class registry populated by @Go at decoration time (runs in both main thread
- * and worker thread). Allows go-runner to find non-exported service classes.
- */
+// Populated when @Go decorates a class (in both main thread and worker thread).
+// Allows go-runner to find non-exported service classes by name.
 export const _goClassRegistry = new Map<string, any>();
 
 export interface GoOptions {
@@ -14,14 +12,9 @@ export interface GoOptions {
 export interface GoMethodDef {
   method: string;
   data?: any;
-  /** Absolute path to the source file containing the service class. Auto-detected via stack trace. */
   file?: string;
 }
 
-/**
- * Walk the Error stack to find the first frame that lives outside the
- * framework's own decorator files — that is the user's service file.
- */
 function detectCallerFile(): string | undefined {
   const lines = (new Error().stack ?? '').split('\n');
   let passedGoFrame = false;
@@ -32,38 +25,15 @@ function detectCallerFile(): string | undefined {
            || line.match(/^\s+at\s+(.+\.[tj]s):\d+:\d+\s*$/);
     if (!m) continue;
     const file = m[1];
-    const isGoFrame = file.includes('decorators/go');
-    if (isGoFrame) {
+    if (file.includes('decorators/go')) {
       passedGoFrame = true;
       continue;
     }
-    // First frame that is NOT the decorator file, after we've seen it at least once
     if (passedGoFrame) return file;
   }
   return undefined;
 }
 
-/**
- * Marks a service method as a real background goroutine.
- * When the server starts, the method is launched in a dedicated Bun Worker thread —
- * true OS-level parallelism, completely independent of the main request-handling thread.
- *
- * The worker runs in full isolation (its own JS context). The method receives
- * `options.data` as its first argument and should create its own DB/service
- * connections if needed.
- *
- * @example
- * @Service()
- * class SyncService {
- *   @Go({ data: { interval: 30_000 } })
- *   async syncFromRemote(data: { interval: number }) {
- *     while (true) {
- *       await Bun.sleep(data.interval);
- *       // ... fetch, store, repeat
- *     }
- *   }
- * }
- */
 export function Go(options?: GoOptions): MethodDecorator {
   const file = detectCallerFile();
   return (target, propertyKey) => {

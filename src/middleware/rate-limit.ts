@@ -27,22 +27,16 @@ export class RateLimitMiddleware {
     const now = Date.now();
     const windowStart = now - this.options.windowMs;
 
-    // Clean up expired entries
     this.cleanup(windowStart);
 
-    // Get or create entry for this key
     let entry = this.store[key];
     if (!entry || entry.resetTime <= now) {
-      entry = {
-        count: 0,
-        resetTime: now + this.options.windowMs
-      };
+      entry = { count: 0, resetTime: now + this.options.windowMs };
       this.store[key] = entry;
     }
 
     entry.count++;
 
-    // Set rate limit headers
     res.setHeader('X-RateLimit-Limit', this.options.max.toString());
     res.setHeader('X-RateLimit-Remaining', Math.max(0, this.options.max - entry.count).toString());
     res.setHeader('X-RateLimit-Reset', new Date(entry.resetTime).toISOString());

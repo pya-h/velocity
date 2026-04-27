@@ -10,5 +10,4 @@ class HealthController {
   }
 }
 
-// Self-register (globalPrefix '/api' → /api/health)
 velo.register(HealthController);

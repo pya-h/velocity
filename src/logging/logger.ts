@@ -42,7 +42,6 @@ export class Logger {
         : meta != null ? ` ${JSON.stringify(meta)}` : '';
       line = `${ts} [${level.toUpperCase()}]: ${message}${extra}`;
     } else {
-      // simple
       const extra = meta != null
         ? ` ${meta instanceof Error ? meta.message : JSON.stringify(meta)}`
         : '';

@@ -13,7 +13,6 @@ import { db } from "../../db";
 import { velo } from "../../velo";
 import * as Joi from "joi";
 
-// --- Auth middleware ---
 const authMiddleware: MiddlewareFunction = (req, res, next) => {
   const token = req.headers["authorization"];
   if (!token) {
@@ -23,7 +22,6 @@ const authMiddleware: MiddlewareFunction = (req, res, next) => {
   next();
 };
 
-// --- Timing interceptor (function-based) ---
 const timingInterceptor = (data: any, req: VelocityRequest, _res: VelocityResponse) => {
   return {
     ...data,
@@ -31,7 +29,6 @@ const timingInterceptor = (data: any, req: VelocityRequest, _res: VelocityRespon
   };
 };
 
-// --- Validation schema ---
 const createPostSchema = Validator.createSchema({
   title: Joi.string().required(),
   content: Joi.string().required(),
@@ -82,5 +79,4 @@ class PostController {
   }
 }
 
-// Self-register (globalPrefix '/api' → /api/posts)
 velo.register(PostController);

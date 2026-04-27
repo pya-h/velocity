@@ -6,7 +6,6 @@ export class TransformInterceptor {
       return data;
     }
 
-    // Add metadata to response
     const transformedData = {
       data: data,
       meta: {

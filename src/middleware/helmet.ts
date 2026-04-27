@@ -12,7 +12,6 @@ export interface HelmetOptions {
   ieNoOpen?: boolean;
   noSniff?: boolean;
   originAgentCluster?: boolean;
-  permittedCrossDomainPolicies?: boolean | { permittedPolicies: string };
   referrerPolicy?: boolean | { policy: string | string[] };
   xssFilter?: boolean;
 }
@@ -21,26 +20,21 @@ export class HelmetMiddleware {
   constructor(private options: HelmetOptions = {}) {}
 
   public use(req: VelocityRequest, res: VelocityResponse, next: () => void): void {
-    // Content Security Policy
     if (this.options.contentSecurityPolicy !== false) {
-      const csp = typeof this.options.contentSecurityPolicy === 'object' 
-        ? this.options.contentSecurityPolicy 
+      const csp = typeof this.options.contentSecurityPolicy === 'object'
+        ? this.options.contentSecurityPolicy
         : { directives: { defaultSrc: ["'self'"] } };
-      
       res.setHeader('Content-Security-Policy', this.buildCSP(csp));
     }
 
-    // Cross-Origin Embedder Policy
     if (this.options.crossOriginEmbedderPolicy !== false) {
       res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
     }
 
-    // Cross-Origin Opener Policy
     if (this.options.crossOriginOpenerPolicy !== false) {
       res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     }
 
-    // Cross-Origin Resource Policy
     if (this.options.crossOriginResourcePolicy !== false) {
       const policy = typeof this.options.crossOriginResourcePolicy === 'object'
         ? this.options.crossOriginResourcePolicy.policy
@@ -48,7 +42,6 @@ export class HelmetMiddleware {
       res.setHeader('Cross-Origin-Resource-Policy', policy);
     }
 
-    // DNS Prefetch Control
     if (this.options.dnsPrefetchControl !== false) {
       const allow = typeof this.options.dnsPrefetchControl === 'object'
         ? this.options.dnsPrefetchControl.allow
@@ -56,7 +49,6 @@ export class HelmetMiddleware {
       res.setHeader('X-DNS-Prefetch-Control', allow ? 'on' : 'off');
     }
 
-    // Frameguard
     if (this.options.frameguard !== false) {
       const action = typeof this.options.frameguard === 'object'
         ? this.options.frameguard.action
@@ -64,40 +56,32 @@ export class HelmetMiddleware {
       res.setHeader('X-Frame-Options', action);
     }
 
-    // Hide Powered By
     if (this.options.hidePoweredBy !== false) {
       res.removeHeader('X-Powered-By');
     }
 
-    // HTTP Strict Transport Security
     if (this.options.hsts !== false) {
       const hsts = typeof this.options.hsts === 'object'
         ? this.options.hsts as any
         : { maxAge: 31536000, includeSubDomains: true };
-      
       let hstsValue = `max-age=${hsts.maxAge || 31536000}`;
       if (hsts.includeSubDomains) hstsValue += '; includeSubDomains';
       if (hsts.preload) hstsValue += '; preload';
-      
       res.setHeader('Strict-Transport-Security', hstsValue);
     }
 
-    // IE No Open
     if (this.options.ieNoOpen !== false) {
       res.setHeader('X-Download-Options', 'noopen');
     }
 
-    // X-Content-Type-Options
     if (this.options.noSniff !== false) {
       res.setHeader('X-Content-Type-Options', 'nosniff');
     }
 
-    // Origin Agent Cluster
     if (this.options.originAgentCluster !== false) {
       res.setHeader('Origin-Agent-Cluster', '?1');
     }
 
-    // Referrer Policy
     if (this.options.referrerPolicy !== false) {
       const policy = typeof this.options.referrerPolicy === 'object'
         ? Array.isArray(this.options.referrerPolicy.policy)
@@ -107,7 +91,6 @@ export class HelmetMiddleware {
       res.setHeader('Referrer-Policy', policy);
     }
 
-    // XSS Filter
     if (this.options.xssFilter !== false) {
       res.setHeader('X-XSS-Protection', '0');
     }

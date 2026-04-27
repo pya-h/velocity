@@ -1,6 +1,5 @@
 import { DatabaseConnection } from './connection';
 
-// Validates and quotes a SQL identifier to prevent injection
 function quoteIdentifier(name: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name)) {
     throw new Error(`Invalid SQL identifier: ${name}`);
@@ -79,55 +78,29 @@ export class QueryBuilder {
   private buildQuery(): string {
     let sql = 'SELECT ';
 
-    // SELECT clause
-    if (this.selectFields.length > 0) {
-      sql += this.selectFields.map(f => f === '*' ? '*' : quoteIdentifier(f)).join(', ');
-    } else {
-      sql += '*';
-    }
+    sql += this.selectFields.length > 0
+      ? this.selectFields.map(f => f === '*' ? '*' : quoteIdentifier(f)).join(', ')
+      : '*';
 
-    // FROM clause
     sql += ` FROM ${quoteIdentifier(this.fromTable)}`;
 
-    // JOIN clauses
-    if (this.joinClauses.length > 0) {
-      sql += ' ' + this.joinClauses.join(' ');
-    }
-
-    // WHERE clause
-    if (this.whereConditions.length > 0) {
-      sql += ' WHERE ' + this.whereConditions.join(' AND ');
-    }
-
-    // ORDER BY clause
-    if (this.orderByFields.length > 0) {
-      sql += ' ORDER BY ' + this.orderByFields.join(', ');
-    }
-
-    // LIMIT clause
-    if (this.limitValue !== undefined) {
-      sql += ` LIMIT ${this.limitValue}`;
-    }
-
-    // OFFSET clause
-    if (this.offsetValue !== undefined) {
-      sql += ` OFFSET ${this.offsetValue}`;
-    }
+    if (this.joinClauses.length > 0) sql += ' ' + this.joinClauses.join(' ');
+    if (this.whereConditions.length > 0) sql += ' WHERE ' + this.whereConditions.join(' AND ');
+    if (this.orderByFields.length > 0) sql += ' ORDER BY ' + this.orderByFields.join(', ');
+    if (this.limitValue !== undefined) sql += ` LIMIT ${this.limitValue}`;
+    if (this.offsetValue !== undefined) sql += ` OFFSET ${this.offsetValue}`;
 
     return sql;
   }
 
-  // Insert builder
   public static insert(connection: DatabaseConnection): InsertBuilder {
     return new InsertBuilder(connection);
   }
 
-  // Update builder
   public static update(connection: DatabaseConnection): UpdateBuilder {
     return new UpdateBuilder(connection);
   }
 
-  // Delete builder
   public static delete(connection: DatabaseConnection): DeleteBuilder {
     return new DeleteBuilder(connection);
   }
@@ -162,8 +135,6 @@ class InsertBuilder {
     const placeholders = fields.map(() => '?').join(', ');
 
     let sql = `INSERT INTO ${quoteIdentifier(this.table)} (${quotedFields}) VALUES (${placeholders})`;
-
-    // Add RETURNING clause for PostgreSQL
     if (this.returningField && this.connection.getType() === 'postgresql') {
       sql += ` RETURNING ${quoteIdentifier(this.returningField)}`;
     }

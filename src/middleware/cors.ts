@@ -21,7 +21,6 @@ export class CorsMiddleware {
       maxAge = 86400
     } = this.options;
 
-    // Set CORS headers
     if (typeof allowedOrigin === 'string') {
       res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     } else if (Array.isArray(allowedOrigin)) {
@@ -42,7 +41,6 @@ export class CorsMiddleware {
     res.setHeader('Access-Control-Allow-Headers', allowedHeaders.join(', '));
     res.setHeader('Access-Control-Max-Age', maxAge.toString());
 
-    // Handle preflight requests
     if (req.method === 'OPTIONS') {
       res.status(204).send('');
       return;

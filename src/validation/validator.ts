@@ -29,9 +29,8 @@ export class Validator {
   };
 }
 
-// Validation decorator
 export function Validate(schema: Joi.ObjectSchema) {
-  return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
+  return function (_target: any, _propertyKey: string, descriptor?: PropertyDescriptor) {
     if (!descriptor) return descriptor;
 
     const originalMethod = descriptor.value;

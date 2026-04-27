@@ -8,7 +8,6 @@ export class DatabaseConnection {
     this.config = config;
   }
 
-  // Convert ? placeholders to $1, $2, ... for PostgreSQL
   private toPgParams(sql: string): string {
     let idx = 0;
     return sql.replace(/\?/g, () => `$${++idx}`);
@@ -51,18 +50,18 @@ export class DatabaseConnection {
 
   public async query(sql: string, params: any[] = []): Promise<any[]> {
     switch (this.config.type) {
-      case 'sqlite':
+      case 'sqlite': {
         const stmt = this.connection.prepare(sql);
         return stmt.all(...params);
-      
-      case 'postgresql':
+      }
+      case 'postgresql': {
         const result = await this.connection.query(this.toPgParams(sql), params);
         return result.rows;
-      
-      case 'mysql':
+      }
+      case 'mysql': {
         const [rows] = await this.connection.execute(sql, params);
         return rows as any[];
-      
+      }
       default:
         throw new Error(`Unsupported database type: ${this.config.type}`);
     }
@@ -70,16 +69,14 @@ export class DatabaseConnection {
 
   public async execute(sql: string, params: any[] = []): Promise<any> {
     switch (this.config.type) {
-      case 'sqlite':
+      case 'sqlite': {
         const stmt = this.connection.prepare(sql);
         return stmt.run(...params);
-      
+      }
       case 'postgresql':
         return await this.connection.query(this.toPgParams(sql), params);
-      
       case 'mysql':
         return await this.connection.execute(sql, params);
-      
       default:
         throw new Error(`Unsupported database type: ${this.config.type}`);
     }

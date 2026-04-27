@@ -1,12 +1,10 @@
 import { MiddlewareFunction, RouteMetadata } from '../types';
 
 const ROUTES_METADATA_KEY = Symbol.for('routes');
-const MIDDLEWARE_METADATA_KEY = Symbol.for('middleware');
 const PENDING_MIDDLEWARES_KEY = Symbol.for('pending_middlewares');
 
-export function Middleware(order: number = 0) {
+export function Middleware() {
   return function <T extends { new (...args: any[]): {} }>(constructor: T) {
-    Reflect.defineMetadata(MIDDLEWARE_METADATA_KEY, { order }, constructor);
     return constructor;
   };
 }

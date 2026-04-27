@@ -1,8 +1,8 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-
-const IS_BUN = typeof Bun !== 'undefined';
 import * as fs from 'fs';
 import * as fsPath from 'path';
+
+const IS_BUN = typeof Bun !== 'undefined';
 import { Container } from './container';
 import { Logger } from '../logging/logger';
 import { Config } from '../config/config';
@@ -10,7 +10,6 @@ import { Database, _setCurrentApp } from '../orm/database';
 import {
   VelocityRequest, VelocityResponse, ApplicationConfig,
   RouteMetadata, ControllerMetadata, RegisterOptions,
-  MiddlewareFunction
 } from '../types';
 import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 
@@ -32,21 +31,12 @@ export class VelocityApplication {
   private routes: Map<string, RouteMetadata[]> = new Map();
   private databases: Database[] = [];
 
-  // Deferred registration queues — processed at listen() time
   private pendingServices: PendingRegistration[] = [];
   private pendingControllers: PendingRegistration[] = [];
-
-  // Scoped DI: per-controller child containers
   private controllerContainers = new Map<any, Container>();
-
-  // Track controller class → mounted path for resolveControllerPath
   private controllerPaths = new Map<any, string>();
-
-  // Static file mounts
-  private fileMounts = new Map<string, string>();      // urlPath → absolute file path
+  private fileMounts = new Map<string, string>();
   private dirMounts: { prefix: string; dir: string }[] = [];
-
-  // @Go background goroutines
   private goServiceClasses: any[] = [];
 
   constructor(config?: Partial<ApplicationConfig>) {
@@ -56,8 +46,6 @@ export class VelocityApplication {
 
     this.server = IS_BUN ? null : createServer((req, res) => this.handleRequest(req, res));
     this.setupContainer();
-
-    // Register this app as the current global app so DB() auto-registers
     _setCurrentApp(this);
   }
 
@@ -197,7 +185,6 @@ export class VelocityApplication {
       if (name) this.container.register(name, serviceClass, singleton);
       this.logger.info(`Registered service: ${serviceClass.name}`);
 
-      // Track services that have @Go background methods
       const goMethods: string[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];
       if (goMethods.length > 0) this.goServiceClasses.push(serviceClass);
     }
@@ -209,11 +196,10 @@ export class VelocityApplication {
       throw new Error(`${controllerClass.name} is not decorated with @Controller`);
     }
 
-    // Resolve the controller instance from its container (child if scoped services exist, else root)
     const container = this.controllerContainers.get(controllerClass) || this.container;
     const controller = container.resolve(controllerClass);
 
-    // Deep-clone route metadata so per-registration middleware doesn't leak across mounts
+    // Deep-clone so per-registration middleware doesn't leak across mounts
     const routesMetadata: RouteMetadata[] = (Reflect.getMetadata(ROUTES_METADATA_KEY, controllerClass) || [])
       .map((r: RouteMetadata) => ({
         ...r,
@@ -221,7 +207,6 @@ export class VelocityApplication {
         interceptors: r.interceptors ? [...r.interceptors] : []
       }));
 
-    // Prepend registration-time middleware to each route
     if (options.middleware && options.middleware.length > 0) {
       for (const route of routesMetadata) {
         route.middlewares = [...options.middleware, ...route.middlewares!];
@@ -258,93 +243,59 @@ export class VelocityApplication {
     }
   }
 
-  /**
-   * Process all pending registrations in correct order:
-   * 1. Services (so DI is ready)
-   * 2. Controllers in topological order (parents before children)
-   *    with circular dependency detection
-   */
   private initializeRegistrations(): void {
-    // 1. Register all services
     for (const { target, options } of this.pendingServices) {
       this.registerService(target, options);
     }
-
-    // 2. Detect circular controller nesting and register in topological order
     this.registerControllersTopological();
-
-    // Clear queues
     this.pendingServices.length = 0;
     this.pendingControllers.length = 0;
   }
 
-  /**
-   * Topological sort of pending controllers: parents are registered before children.
-   * Detects circular nesting (A scoped to B, B scoped to A).
-   */
+  // Topological sort: parents registered before children; circular nesting detected.
   private registerControllersTopological(): void {
-    // Build adjacency: child → Set<parent classes it depends on>
     const dependsOn = new Map<any, Set<any>>();
     const pending = new Map<any, PendingRegistration>();
 
     for (const reg of this.pendingControllers) {
       pending.set(reg.target, reg);
-      if (reg.options.scope && reg.options.scope.length > 0) {
-        dependsOn.set(reg.target, new Set(reg.options.scope));
-      } else {
-        dependsOn.set(reg.target, new Set());
-      }
+      dependsOn.set(reg.target, new Set(reg.options.scope?.length ? reg.options.scope : []));
     }
 
     const registered = new Set<any>();
-    const visiting = new Set<any>();   // cycle detection
+    const visiting = new Set<any>();
 
     const visit = (target: any) => {
       if (registered.has(target)) return;
-
       if (visiting.has(target)) {
-        // Build cycle path for error message
         const names = [...visiting].map((t: any) => t.name).join(' → ');
         throw new Error(`Circular controller nesting detected: ${names} → ${target.name}`);
       }
 
       visiting.add(target);
 
-      // Visit dependencies (parent controllers) first
       const deps = dependsOn.get(target);
       if (deps) {
         for (const dep of deps) {
-          if (pending.has(dep)) {
-            visit(dep);
-          }
-          // If dep isn't pending, it's either already registered or external — fine
+          if (pending.has(dep)) visit(dep);
+          // dep not in pending = already registered or external, skip
         }
       }
 
       visiting.delete(target);
-
-      // Now register this controller
       const reg = pending.get(target);
-      if (reg) {
-        this.registerController(reg.target, reg.options);
-      }
+      if (reg) this.registerController(reg.target, reg.options);
       registered.add(target);
     };
 
-    for (const target of pending.keys()) {
-      visit(target);
-    }
+    for (const target of pending.keys()) visit(target);
   }
 
   // ─── Path helpers ───
 
-  /** Resolve the final mounted path for a controller class (already registered) */
   private resolveControllerPath(controllerClass: any): string {
-    // Direct lookup from the class → path map (set during registerController)
     const knownPath = this.controllerPaths.get(controllerClass);
     if (knownPath) return knownPath;
-
-    // Not yet mounted — use its decorator path with global prefix
     const meta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, controllerClass);
     if (!meta) throw new Error(`${controllerClass.name} is not a @Controller`);
     return this.applyGlobalPrefix(meta.path);
@@ -356,7 +307,7 @@ export class VelocityApplication {
 
     const exclusions = this.config.get('globalPrefixExclusions') || [];
     for (const exclusion of exclusions) {
-      // Exact match or match at segment boundary (e.g. "/health" excludes "/health" and "/health/check" but not "/healthcheck")
+      // Segment boundary match: "/health" excludes "/health" and "/health/check" but not "/healthcheck"
       if (path === exclusion || path.startsWith(exclusion + '/')) return path;
     }
 
@@ -378,7 +329,6 @@ export class VelocityApplication {
 
   // ─── Database registration ───
 
-  /** Register a Database instance (called automatically by DB() factory) */
   public registerDatabase(database: Database): void {
     this.databases.push(database);
     this.container.register(`db:${database.name}`, database);
@@ -387,7 +337,6 @@ export class VelocityApplication {
     }
   }
 
-  /** Initialize all registered databases */
   private async initializeDatabases(): Promise<void> {
     for (const db of this.databases) {
       if (!db.initialized) {
@@ -403,10 +352,7 @@ export class VelocityApplication {
     const finalPort = port || this.config.get('port') || 5000;
     const finalHost = host || this.config.get('host') || '0.0.0.0';
 
-    // Process all pending registrations
     this.initializeRegistrations();
-
-    // Initialize databases before starting the server
     await this.initializeDatabases();
 
     this.logger.info('Application initialized successfully');
@@ -438,7 +384,6 @@ export class VelocityApplication {
   }
 
   public async close(): Promise<void> {
-    // Close all databases
     for (const db of this.databases) {
       await db.close();
     }
@@ -472,7 +417,6 @@ export class VelocityApplication {
       const pathname = url.pathname;
       const method = req.method?.toUpperCase() || 'GET';
 
-      // CORS
       const corsConfig = this.config.get('cors');
       if (corsConfig) {
         let allowedOrigin: string;
@@ -491,7 +435,6 @@ export class VelocityApplication {
         if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       }
 
-      // Static files (before body parsing for efficiency)
       if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
 
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
@@ -509,7 +452,6 @@ export class VelocityApplication {
 
       velocityReq.params = params;
 
-      // Execute middlewares
       if (route.middlewares) {
         for (const middleware of route.middlewares) {
           let nextCalled = false;
@@ -523,10 +465,8 @@ export class VelocityApplication {
         }
       }
 
-      // Execute route handler
       const result = await controller[route.handler](velocityReq, velocityRes);
 
-      // Execute interceptors
       let finalResult = result;
       if (route.interceptors) {
         for (const interceptor of route.interceptors) {
@@ -534,7 +474,6 @@ export class VelocityApplication {
         }
       }
 
-      // Send response if not already sent
       if (!velocityRes.headersSent) {
         if (finalResult !== undefined) {
           velocityRes.json(finalResult);
@@ -581,8 +520,6 @@ export class VelocityApplication {
 
   private async parseBody(req: IncomingMessage): Promise<any> {
     const MAX_BODY_SIZE = 1024 * 1024;
-
-    // Bun path: consume the Web Request body directly
     const bunReq: Request | undefined = (req as any).__bunNativeRequest;
     if (bunReq) {
       const cl = parseInt(bunReq.headers.get('content-length') || '0', 10);
@@ -725,13 +662,11 @@ export class VelocityApplication {
     const pathname = reqUrl.pathname;
     const method = request.method.toUpperCase();
 
-    // Static files: serve directly via Bun.file() with CORS headers
     if (method === 'GET') {
       const staticResp = this.tryServeStaticBun(pathname, request.headers);
       if (staticResp) return staticResp;
     }
 
-    // All other requests: adapt to Node-compatible req/res and run through handleRequest
     const { req, res, getResponse } = this.createBunReqRes(request, reqUrl);
     await this.handleRequest(req, res);
     return getResponse();
@@ -790,7 +725,6 @@ export class VelocityApplication {
     request: Request,
     url: URL,
   ): { req: VelocityRequest; res: VelocityResponse; getResponse: () => Response } {
-    // Build a plain headers record (Web API Headers → Record)
     const headers: Record<string, string | string[] | undefined> = {};
     request.headers.forEach((value, key) => { headers[key] = value; });
 
@@ -831,7 +765,6 @@ export class VelocityApplication {
         if (data !== undefined && data !== '') _body = data;
         _sent = true;
       },
-      // Minimal writable-stream no-ops (static files handled separately on Bun)
       write() {},
       on()             { return rawRes; },
       once()           { return rawRes; },
