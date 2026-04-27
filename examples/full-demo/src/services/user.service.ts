@@ -1,4 +1,4 @@
-import { Go, Service } from '@velocity/framework';
+import { Service } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
 

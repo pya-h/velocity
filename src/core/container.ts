@@ -31,7 +31,7 @@ export class Container {
         this.services.set(identifier, {
           factory: serviceOrFactory as () => T,
           singleton,
-          constructor: undefined
+          constructor: undefined,
         });
       }
     } else {
@@ -39,7 +39,7 @@ export class Container {
       this.services.set(identifier, {
         instance: serviceOrFactory,
         singleton: true,
-        constructor: undefined
+        constructor: undefined,
       });
     }
   }

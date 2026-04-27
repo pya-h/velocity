@@ -33,7 +33,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **Security headers** — built-in Helmet-style security headers
 - **Logging** — custom zero-dep structured logger (JSON/simple/combined, console/file)
 - **Test framework** — `@Suite/@Test/@BeforeEach/@AfterEach/@BeforeAll/@AfterAll/@Mock` decorators built on `bun:test`
-- **Zero bloat** — no express, no reflect-metadata, no Winston; uses Node's `http` module directly
+- **Zero bloat** — no express, no reflect-metadata, no Winston; 3 prod deps (joi + pg + mysql2)
 
 ## Scripts & Tools
 

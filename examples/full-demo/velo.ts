@@ -22,4 +22,12 @@ export const velo = new VelocityApplication({
     windowMs: 15 * 60 * 1000,
     max: 100,
   },
+  compression: {
+    enabled: true,
+    threshold: 1024,
+  },
+  shutdown: {
+    timeout: 5000,
+    auto: true,
+  },
 });

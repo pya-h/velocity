@@ -49,7 +49,7 @@ export class EntityAccessor<T = any> {
       .from(this.metadata.tableName);
 
     for (const [key, value] of Object.entries(conditions)) {
-      qb = qb.where(`${key} = ?`, value);
+      qb = qb.where(`"${key}" = ?`, value);
     }
     return qb.first();
   }
@@ -61,7 +61,7 @@ export class EntityAccessor<T = any> {
       .from(this.metadata.tableName);
 
     for (const [key, value] of Object.entries(conditions)) {
-      qb = qb.where(`${key} = ?`, value);
+      qb = qb.where(`"${key}" = ?`, value);
     }
     return qb.execute();
   }

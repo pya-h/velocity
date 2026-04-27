@@ -37,6 +37,9 @@
  *   curl 'localhost:5000/.countUsers()'
  *   curl 'localhost:5000/.greet("Alice",true)'
  *   curl 'localhost:5000/.greet(Bob,false)'
+ *
+ * WebSocket:
+ *   wscat -c ws://localhost:5000/ws/echo
  */
 
 import * as path from 'path';
@@ -58,9 +61,35 @@ import './src/controllers/health.controller';
 import './src/controllers/user.controller';
 import './src/controllers/post.controller';
 import './src/controllers/job.controller';
+import './src/controllers/upload.controller';
+
+// WebSocket gateway
+import { EchoGateway } from './src/gateways/echo.gateway';
+velo.registerWebSocket(EchoGateway);
+
+// ── Lifecycle hooks ─────────────────────────────────────────────────────────
+
+velo.onRequest((req) => {
+  (req as any)._startTime = performance.now();
+});
+
+velo.onResponse((req, _res) => {
+  const ms = (performance.now() - ((req as any)._startTime || 0)).toFixed(1);
+  console.log(`  ⏱ ${req.method} ${req.url} — ${ms}ms`);
+});
+
+velo.onError((error, _req, res) => {
+  console.error('  ✖ Error:', error.message);
+  if (!res.headersSent) {
+    res.status(500).json({ error: error.message, code: 'INTERNAL_ERROR' });
+  }
+});
+
+// ── Static files & generated tools ──────────────────────────────────────────
 
 async function main() {
   velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));
+  velo.serve('/api-docs', path.join(__dirname, 'velo/openapi.json'));
 
   await velo.listen();
 }
