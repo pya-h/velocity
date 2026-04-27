@@ -75,7 +75,7 @@ function parseController(filePath) {
 
   // Parse schemas
   const schemas = {};
-  const schemaRe = /const\s+(\w+)\s*=\s*Validator\.createSchema\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
+  const schemaRe = /const\s+(\w+)\s*=\s*(?:await\s+)?Validator\.createSchema\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
   let sm;
   while ((sm = schemaRe.exec(content)) !== null) schemas[sm[1]] = parseJoiFields(sm[2]);
 

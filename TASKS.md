@@ -30,12 +30,13 @@ Public API (`debug`, `info`, `warn`, `error`, `log`) is unchanged.
 
 ---
 
-### T-03: Lazy-load `joi`
+### T-03: Lazy-load `joi` — DROPPED
 **Area:** Memory
-Joi (~5-8 MB) is loaded at startup even in apps that use no `@Validate` decorators.
-Move the `import * as Joi from 'joi'` inside `Validator.createSchema()` and the `@Validate`
-decorator handler using dynamic `await import('joi')`.
-**Impact:** Saves ~5-8 MB idle RSS for apps with no validation.
+Attempted: replace static `import * as Joi from 'joi'` with dynamic `await import('joi')` inside
+`createSchema()`. Reverted because `createSchema()` is called at module top-level in controllers
+(before class decoration), requiring top-level `await` — which conflicts with `"module": commonjs`
+in tsconfig and causes issues in non-Bun contexts. The memory saving (~5-8 MB) was also deemed
+not worth the API complexity. Joi remains a static import.
 
 ---
 
@@ -154,3 +155,33 @@ Simple to implement — one extra decorator + a guard-run loop before the middle
 - Session: provide a `SessionMiddleware` that stores session data in memory (or pluggable store).
 No mandatory dep — cookie parsing is a small string operation; session store defaults to
 in-memory `Map`.
+
+---
+
+### T-SE-05: `@Go` background goroutines — DONE
+**Area:** DX / background jobs / real parallelism
+Go-style background workers for service methods. When the server starts, each `@Go`-decorated
+method is launched in a **real Bun Worker thread** — a separate OS thread with its own JS
+context. True CPU + I/O parallelism; the worker never blocks the main request-handling thread.
+```typescript
+@Service()
+class SyncService {
+  @Go({ data: { interval: 30_000 } })
+  async syncFromRemote(data: { interval: number }) {
+    while (true) {
+      await Bun.sleep(data.interval);
+      // runs in its own thread — never blocks the server
+    }
+  }
+}
+velo.register(SyncService);
+```
+`@Go(options?)` accepts `{ data?: any }` — the data is `postMessage`d to the worker and
+forwarded as the first argument to the method. The worker imports the service file, instantiates
+the class (no DI container — the worker is isolated), and calls the method.
+Source file auto-detection: `@Go` captures the call stack at decoration time to find the
+service file path; no manual annotation needed.
+Fallback: if not on Bun, or if file detection fails, falls back to event-loop concurrency
+with a warning logged.
+**Implementation:** `src/decorators/go.ts`, `src/workers/go-runner.ts`,
+`VelocityApplication.startGoMethods()` (spawns `new Worker(goRunnerPath)`).

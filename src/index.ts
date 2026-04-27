@@ -10,6 +10,7 @@ export { Get, Post, Put, Delete, Patch } from './decorators/route';
 export { Middleware, UseMiddleware } from './decorators/middleware';
 export { Interceptor, UseInterceptor } from './decorators/interceptor';
 export { Service } from './decorators/service';
+export { Go } from './decorators/go';
 
 // ORM exports
 export { Entity, Column, PrimaryKey } from './orm/decorators';

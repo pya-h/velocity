@@ -45,13 +45,13 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 | **Hono (Node)** | ~50 MB (Node.js) |
 | **Elysia (Bun)** | ~15 MB (Bun.serve() native, minimal deps) |
 
-Database drivers (pg, mysql2, bun:sqlite) are now **lazily loaded** via dynamic `import()` inside `connect()` — they are never imported unless the configured driver type is actually used. This means:
+Database drivers (pg, mysql2, bun:sqlite) are **lazily loaded** via dynamic `import()` inside `connect()` — they are never imported unless the configured driver type is actually used. This means:
 
 - A process that never calls `connect()` (e.g. a test suite, a script, a microservice with no DB) pays zero driver overhead.
 - `bun:sqlite` is a Bun built-in (no disk I/O, resolves from internal registry).
-- `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache on all subsequent calls. Since `connect()` is called once at startup, there is no per-request overhead.
+- `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache. Since `connect()` is called once at startup, there is no per-request overhead.
 
-**Fair comparison note:** other frameworks in this table ship with no DB driver and no logger. Velocity's ~75 MB no-DB figure (vs raw Bun ~46 MB) reflects winston + joi + reflect-metadata — the 3 always-on framework dependencies. The extra ~4 MB for SQLite comes from `bun:sqlite` being a Bun built-in (negligible vs a native addon). `pg` and `mysql2` are **never loaded** unless the configured type is `postgresql` or `mysql`, so they contribute nothing to RSS in a SQLite-only app.
+**Fair comparison note:** other frameworks in this table ship with no DB driver and no logger. Velocity's ~75 MB no-DB figure (vs raw Bun ~46 MB) reflects joi + reflect-metadata + the custom logger — the always-on framework dependencies. `pg` and `mysql2` are **never loaded** unless the configured type is `postgresql` or `mysql`, so they contribute nothing to RSS in a SQLite-only app.
 
 Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node's V8 at similar scale — this is why Velocity on Bun (~75 MB no-DB) doesn't look dramatically better than Express on Node (~62 MB). The throughput advantage is where Bun shows up (14,142 vs ~5,000 req/sec).
 
@@ -81,6 +81,7 @@ Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node
 - **DI without module boilerplate**: NestJS requires `@Module({ imports, controllers, providers })` for every feature. Velocity: just `velo.register(X)`.
 - **Type-safe env config**: Envelocity generates types from `.env` — zero runtime cost for type safety, OrThrow without function calls.
 - **Built-in API tester**: `npm run apitester` generates an interactive testing UI from decorators — no Postman, no Swagger setup, no external tools. No other framework does this.
+- **`@Go()` background goroutines**: Service methods decorated with `@Go()` launch in a real **Bun Worker thread** when the server starts — true OS-level parallelism, not event-loop concurrency. Accepts `{ data }` for passing initial config to the worker. No other framework has this.
 - **Static file serving**: `velo.serve()` and `velo.static()` — single files or directories, with MIME detection and path traversal protection.
 - **Config-based CORS**: Set `cors: { origin: '*' }` in config — automatic `Access-Control-*` headers and OPTIONS handling. No middleware to install.
 

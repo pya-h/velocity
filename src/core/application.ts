@@ -12,6 +12,7 @@ import {
   RouteMetadata, ControllerMetadata, RegisterOptions,
   MiddlewareFunction
 } from '../types';
+import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
@@ -44,6 +45,9 @@ export class VelocityApplication {
   // Static file mounts
   private fileMounts = new Map<string, string>();      // urlPath → absolute file path
   private dirMounts: { prefix: string; dir: string }[] = [];
+
+  // @Go background goroutines
+  private goServiceClasses: any[] = [];
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -192,6 +196,10 @@ export class VelocityApplication {
       this.container.register(serviceClass, serviceClass, singleton);
       if (name) this.container.register(name, serviceClass, singleton);
       this.logger.info(`Registered service: ${serviceClass.name}`);
+
+      // Track services that have @Go background methods
+      const goMethods: string[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];
+      if (goMethods.length > 0) this.goServiceClasses.push(serviceClass);
     }
   }
 
@@ -410,6 +418,7 @@ export class VelocityApplication {
         fetch: (request: Request) => this.bunFetchHandler(request),
       });
       this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
+      this.startGoMethods();
       return;
     }
 
@@ -422,6 +431,7 @@ export class VelocityApplication {
       });
       this.server.listen(finalPort, finalHost, () => {
         this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
+        this.startGoMethods();
         resolve();
       });
     });
@@ -654,6 +664,57 @@ export class VelocityApplication {
     }
 
     return { params };
+  }
+
+  // ─── Background goroutines (@Go) ───
+
+  private startGoMethods(): void {
+    const goRunnerPath = fsPath.join(__dirname, '..', 'workers', 'go-runner.ts');
+
+    for (const serviceClass of this.goServiceClasses) {
+      const defs: GoMethodDef[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];
+
+      for (const def of defs) {
+        if (!IS_BUN || !def.file) {
+          // Fallback: event-loop concurrency when not on Bun or file detection failed
+          if (!IS_BUN) {
+            this.logger.warn(`@Go: ${serviceClass.name}.${def.method} — Bun Workers require the Bun runtime. Falling back to event-loop.`);
+          } else {
+            this.logger.warn(`@Go: ${serviceClass.name}.${def.method} — could not auto-detect source file. Falling back to event-loop.`);
+          }
+          let instance: any;
+          try { instance = this.container.resolve(serviceClass); }
+          catch (err) { this.logger.error(`@Go: failed to resolve ${serviceClass.name}`, err as Error); continue; }
+          setImmediate(() => {
+            Promise.resolve(instance[def.method](def.data)).catch((err: Error) => {
+              this.logger.error(`@Go: ${serviceClass.name}.${def.method} crashed`, err);
+            });
+          });
+          continue;
+        }
+
+        try {
+          const worker = new Worker(goRunnerPath);
+          worker.postMessage({
+            serviceFile: def.file,
+            className: serviceClass.name,
+            method: def.method,
+            data: def.data,
+          });
+          worker.addEventListener('message', (e: MessageEvent) => {
+            if (e.data?.type === 'error') {
+              this.logger.error(`@Go[${serviceClass.name}.${def.method}]: ${e.data.message}`);
+            }
+          });
+          worker.addEventListener('error', (e: ErrorEvent) => {
+            this.logger.error(`@Go worker crashed: ${serviceClass.name}.${def.method}`, new Error(e.message));
+          });
+          this.logger.debug(`@Go: spawned worker thread for ${serviceClass.name}.${def.method}()`);
+        } catch (err) {
+          this.logger.error(`@Go: failed to spawn worker for ${serviceClass.name}.${def.method}`, err as Error);
+        }
+      }
+    }
   }
 
   // ─── Bun.serve() adapter ───
