@@ -11,6 +11,9 @@ export interface ChannelParamDef {
  * Parameter decorator for @Go methods.
  * Injects a VelocityChannel<T> instance with the given channel name into the worker.
  *
+ * All parameters that receive data should be decorated with @Channel.
+ * Any un-decorated parameter position will be undefined at runtime.
+ *
  * @example
  * @Go()
  * async run(@Channel('velocity:jobs') jobs: VelocityChannel<Job>) {

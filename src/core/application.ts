@@ -187,7 +187,7 @@ export class VelocityApplication {
       if (name) this.container.register(name, serviceClass, singleton);
       this.logger.info(`Registered service: ${serviceClass.name}`);
 
-      const goMethods: string[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];
+      const goMethods: GoMethodDef[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];
       if (goMethods.length > 0) this.goServiceClasses.push(serviceClass);
     }
   }
