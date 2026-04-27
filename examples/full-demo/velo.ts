@@ -3,22 +3,23 @@
  * Separated from main.ts to avoid circular dependency issues.
  */
 import { VelocityApplication } from '@velocity/framework';
+import { envelocity } from './velo/envelocity';
 
 export const velo = new VelocityApplication({
-  port: 5000,
-  host: '0.0.0.0',
+  port: parseInt(envelocity.server.portOrThrow),
+  host: envelocity.server.hostOrThrow,
   globalPrefix: '/api',
   logger: {
     level: 'info',
     format: 'combined',
-    outputs: ['console']
+    outputs: ['console'],
   },
   cors: {
     origin: '*',
-    credentials: false
+    credentials: false,
   },
   rateLimit: {
     windowMs: 15 * 60 * 1000,
-    max: 100
-  }
+    max: 100,
+  },
 });

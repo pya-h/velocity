@@ -13,24 +13,10 @@ export interface JobResult {
   processedAt: string;
 }
 
-const jobChannel    = new VelocityChannel<Job>('velocity:jobs');
-const resultChannel = new VelocityChannel<JobResult>('velocity:results');
-
-let jobIdCounter = 0;
-export const processedResults: JobResult[] = [];
-
-// Collect results from the @Go worker on the main event loop
-(async () => {
-  for await (const result of resultChannel) {
-    processedResults.push(result);
-  }
-})();
-
-export function enqueueJob(payload: any): Job {
-  const job: Job = { id: ++jobIdCounter, payload, enqueuedAt: new Date().toISOString() };
-  jobChannel.send(job);
-  return job;
-}
+// Exported so job.controller.ts can send jobs and receive results on the main thread.
+// The @Go worker receives its own isolated channel instances via @Channel injection.
+export const jobChannel    = new VelocityChannel<Job>('velocity:jobs');
+export const resultChannel = new VelocityChannel<JobResult>('velocity:results');
 
 @Service()
 class JobWorkerService {

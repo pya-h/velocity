@@ -9,7 +9,7 @@ import {
   Validator,
 } from "@velocity/framework";
 import type { VelocityRequest, VelocityResponse, MiddlewareFunction } from "@velocity/framework";
-import { db } from "../../db";
+import { pgDb } from "../../pgDb";
 import { velo } from "../../velo";
 import * as Joi from "joi";
 
@@ -40,7 +40,7 @@ class PostController {
   @Get("/")
   @UseInterceptor(timingInterceptor)
   async list(_req: VelocityRequest, _res: VelocityResponse) {
-    const posts = await db.Post.findAll();
+    const posts = await pgDb.Post.findAll();
     return { posts };
   }
 
@@ -49,7 +49,7 @@ class PostController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
-    const post = await db.Post.findById(id);
+    const post = await pgDb.Post.findById(id);
     if (!post) return res.status(404).json({ error: "Post not found" });
     return { post };
   }
@@ -58,7 +58,7 @@ class PostController {
   @UseMiddleware(authMiddleware)
   @Validate(createPostSchema)
   async create(req: VelocityRequest, res: VelocityResponse) {
-    const post = await db.Post.create({
+    const post = await pgDb.Post.create({
       ...req.body,
       createdAt: new Date().toISOString(),
     });
@@ -71,10 +71,10 @@ class PostController {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
-    const post = await db.Post.findById(id);
+    const post = await pgDb.Post.findById(id);
     if (!post) return res.status(404).json({ error: "Post not found" });
 
-    await db.Post.delete(id);
+    await pgDb.Post.delete(id);
     return res.status(204).send("");
   }
 }

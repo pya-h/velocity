@@ -12,6 +12,13 @@ const ENV_KEYS = [
   'DB__DATABASE',
   'DB__FILENAME',
   'DB__TYPE',
+  'PG__DATABASE',
+  'PG__HOST',
+  'PG__PASSWORD',
+  'PG__POOL__MAX',
+  'PG__POOL__MIN',
+  'PG__PORT',
+  'PG__USER',
   'SERVER__HOST',
   'SERVER__PORT',
 ];
@@ -34,6 +41,24 @@ export interface EnvelocityConfig {
     readonly filenameOrThrow: string;
     readonly type: string | undefined;
     readonly typeOrThrow: string;
+  };
+  readonly pg: {
+    readonly database: string | undefined;
+    readonly databaseOrThrow: string;
+    readonly host: string | undefined;
+    readonly hostOrThrow: string;
+    readonly password: string | undefined;
+    readonly passwordOrThrow: string;
+    readonly pool: {
+      readonly max: string | undefined;
+      readonly maxOrThrow: string;
+      readonly min: string | undefined;
+      readonly minOrThrow: string;
+    };
+    readonly port: string | undefined;
+    readonly portOrThrow: string;
+    readonly user: string | undefined;
+    readonly userOrThrow: string;
   };
   readonly server: {
     readonly host: string | undefined;

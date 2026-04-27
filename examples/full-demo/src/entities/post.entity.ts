@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryKey } from '@velocity/framework';
-import { db } from '../../db';
+import { pgDb } from '../../pgDb';
 
 @Entity('posts')
 export class Post {
@@ -27,5 +27,5 @@ export class Post {
   }
 }
 
-// Self-register on the database
-db.register(Post);
+// Self-register on the PostgreSQL database
+pgDb.register(Post);

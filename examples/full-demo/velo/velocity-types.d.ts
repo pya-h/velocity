@@ -4,9 +4,15 @@
 import type { EntityAccessor, Database } from '@velocity/framework';
 import type { User } from '../src/entities/user.entity';
 import type { Post } from '../src/entities/post.entity';
+import type { JobRecord } from '../src/entities/job-record.entity';
 
-/** Typed database interface for `db` */
+/** Typed database interface for `db` (SQLite) */
 export interface TypedDb extends Database {
   readonly User: EntityAccessor<User>;
+}
+
+/** Typed database interface for `pgDb` (PostgreSQL) */
+export interface TypedPgDb extends Database {
   readonly Post: EntityAccessor<Post>;
+  readonly JobRecord: EntityAccessor<JobRecord>;
 }
