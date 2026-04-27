@@ -23,6 +23,14 @@ interface PendingRegistration {
   options: RegisterOptions;
 }
 
+interface CompiledRoute {
+  regex: RegExp;
+  paramNames: string[];
+  method: string;
+  controller: any;
+  route: RouteMetadata;
+}
+
 export class VelocityApplication {
   private server: any;
   private container: Container;
@@ -31,6 +39,7 @@ export class VelocityApplication {
   private controllers: Map<string, any> = new Map();
   private routes: Map<string, RouteMetadata[]> = new Map();
   private functionRegistry = new Map<string, { instance: any; method: string }>();
+  private compiledRoutes: CompiledRoute[] = [];
   private databases: Database[] = [];
 
   private pendingServices: PendingRegistration[] = [];
@@ -364,6 +373,7 @@ export class VelocityApplication {
     const finalHost = host || this.config.get('host') || '0.0.0.0';
 
     this.initializeRegistrations();
+    this.compileRoutes();
     await this.initializeDatabases();
 
     this.logger.info('Application initialized successfully');
@@ -606,47 +616,50 @@ export class VelocityApplication {
     }
   }
 
-  private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {
-    for (const [basePath, routes] of this.routes.entries()) {
-      for (const route of routes) {
-        if (route.method !== method) continue;
+  private compilePattern(pattern: string): { regex: RegExp; paramNames: string[] } {
+    const paramNames: string[] = [];
+    const parts = pattern.split('/').filter(p => p !== '');
 
-        const fullPath = basePath + route.path;
-        const match = this.matchPath(fullPath, pathname);
-
-        if (match) {
-          const controller = this.controllers.get(basePath);
-          return { controller, route, params: match.params };
-        }
-      }
+    if (parts.length === 0) {
+      return { regex: /^\/$/, paramNames: [] };
     }
 
-    return { controller: null, route: null, params: {} };
+    const segments = parts.map(part => {
+      if (part.startsWith(':')) {
+        const name = part.slice(1);
+        paramNames.push(name);
+        return `(?<${name}>[^/]+)`;
+      }
+      return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    });
+
+    return { regex: new RegExp(`^/${segments.join('/')}$`), paramNames };
   }
 
-  private matchPath(pattern: string, pathname: string): { params: Record<string, string> } | null {
-    const patternParts = pattern.split('/').filter(p => p);
-    const pathnameParts = pathname.split('/').filter(p => p);
-
-    if (patternParts.length !== pathnameParts.length) {
-      return null;
-    }
-
-    const params: Record<string, string> = {};
-
-    for (let i = 0; i < patternParts.length; i++) {
-      const patternPart = patternParts[i];
-      const pathnamePart = pathnameParts[i];
-
-      if (patternPart.startsWith(':')) {
-        const paramName = patternPart.slice(1);
-        params[paramName] = pathnamePart;
-      } else if (patternPart !== pathnamePart) {
-        return null;
+  private compileRoutes(): void {
+    this.compiledRoutes = [];
+    for (const [basePath, routes] of this.routes.entries()) {
+      const controller = this.controllers.get(basePath);
+      for (const route of routes) {
+        const { regex, paramNames } = this.compilePattern(basePath + route.path);
+        this.compiledRoutes.push({ regex, paramNames, method: route.method, controller, route });
       }
     }
+  }
 
-    return { params };
+  private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {
+    for (const cr of this.compiledRoutes) {
+      if (cr.method !== method) continue;
+      const match = cr.regex.exec(pathname);
+      if (match) {
+        const params: Record<string, string> = {};
+        for (const name of cr.paramNames) {
+          params[name] = match.groups![name];
+        }
+        return { controller: cr.controller, route: cr.route, params };
+      }
+    }
+    return { controller: null, route: null, params: {} };
   }
 
   // ─── Background goroutines (@Go) ───

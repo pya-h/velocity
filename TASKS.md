@@ -40,14 +40,23 @@ not worth the API complexity. Joi remains a static import.
 
 ---
 
-### T-04: Pre-compile route patterns at registration time
+### T-04: Pre-compile route patterns at registration time — DONE
 **Area:** Performance (hot path)
-Route patterns like `/:id` are currently parsed per-request in `matchPath()`. Compile each
-pattern to a `RegExp` with named capture groups once during `register()`. Store the compiled
-regex alongside the handler. On each request, run the pre-compiled regex instead of re-parsing
-the pattern string.
-**Impact:** Removes repeated string splitting from the hot path. Most visible under high concurrency
-with parameter routes. Prerequisite for reducing the adapter overhead measured in T-01.
+Route patterns like `/:id` were previously parsed per-request in `matchPath()` (split by `/`,
+filter empty parts, iterate). Each request triggered repeated string splitting and character-by-character
+pattern scanning for every registered route.
+
+Patterns are now compiled once in `compileRoutes()` (called at `listen()` time, after all
+controllers are registered). Each `basePath + route.path` combination is converted to a `RegExp`
+with named capture groups via `compilePattern()`:
+- `/users/:id` → `/^\/users\/(?<id>[^\/]+)$/` with `paramNames = ['id']`
+- `/api/posts` → `/^\/api\/posts$/` with `paramNames = []`
+
+The compiled entries are stored in a flat `compiledRoutes: CompiledRoute[]` array. `findRoute()`
+now does a single `regex.exec(pathname)` per entry — no string splitting, no per-segment loops.
+`matchPath()` was removed (dead code).
+**Result:** Eliminates per-request string allocation and iterative segment scanning from the hot
+path. Most visible under high concurrency with parameterized routes (T-01 follow-up).
 
 ---
 
@@ -158,30 +167,67 @@ in-memory `Map`.
 
 ---
 
-### T-SE-05: `@Go` background goroutines — DONE
+### T-SE-05: `@Go` background goroutines + `@Channel` injection — DONE
 **Area:** DX / background jobs / real parallelism
 Go-style background workers for service methods. When the server starts, each `@Go`-decorated
 method is launched in a **real Bun Worker thread** — a separate OS thread with its own JS
 context. True CPU + I/O parallelism; the worker never blocks the main request-handling thread.
+
+Channels are injected directly into worker method parameters via the `@Channel(name)` parameter
+decorator. No manual `new VelocityChannel(...)` instantiation needed inside the method body.
+`VelocityChannel<T>` is backed by `BroadcastChannel` — fully cross-thread typed message passing.
 ```typescript
 @Service()
-class SyncService {
-  @Go({ data: { interval: 30_000 } })
-  async syncFromRemote(data: { interval: number }) {
-    while (true) {
-      await Bun.sleep(data.interval);
-      // runs in its own thread — never blocks the server
+class JobWorkerService {
+  @Go()
+  async run(
+    @Channel('velocity:jobs') jobs: VelocityChannel<Job>,
+    @Channel('velocity:results') out: VelocityChannel<JobResult>,
+  ) {
+    for await (const job of jobs) {
+      out.send({ jobId: job.id, output: `processed` });
     }
   }
 }
-velo.register(SyncService);
+velo.register(JobWorkerService);
 ```
-`@Go(options?)` accepts `{ data?: any }` — the data is `postMessage`d to the worker and
-forwarded as the first argument to the method. The worker imports the service file, instantiates
-the class (no DI container — the worker is isolated), and calls the method.
+`@Go(options?)` accepts `{ data?: any }` — the data is `postMessage`d to the worker. If any
+parameter is decorated with `@Channel`, channels are resolved and injected at those positions;
+the `data` payload is ignored (it only applies when no `@Channel` decorators are present).
 Source file auto-detection: `@Go` captures the call stack at decoration time to find the
 service file path; no manual annotation needed.
 Fallback: if not on Bun, or if file detection fails, falls back to event-loop concurrency
 with a warning logged.
-**Implementation:** `src/decorators/go.ts`, `src/workers/go-runner.ts`,
-`VelocityApplication.startGoMethods()` (spawns `new Worker(goRunnerPath)`).
+**Implementation:** `src/decorators/go.ts`, `src/decorators/channel.ts`,
+`src/workers/go-runner.ts`, `VelocityApplication.startGoMethods()` (spawns `new Worker(goRunnerPath)`).
+
+---
+
+### T-SE-06: HTTP Function Calls (`@Fn`) — DONE
+**Area:** DX / RPC-style endpoints
+Mark any controller method with `@Fn()` to make it callable at `GET /.methodName(arg1,arg2,...)`.
+Arguments are parsed directly from the URL path — numbers, booleans, `null`, quoted strings,
+unquoted strings — with no `req`/`res` parameters or routing boilerplate.
+```typescript
+@Controller('/users')
+class UserController {
+  // GET /.findUser(1)
+  @Fn()
+  async findUser(id: number) {
+    return db.User.findById(id);
+  }
+
+  // GET /.greet("Alice",true)  or  GET /.greet(Bob,false)
+  @Fn()
+  async greet(name: string, formal: boolean) {
+    return { message: formal ? `Good day, ${name}.` : `Hey ${name}!` };
+  }
+}
+```
+All HTTP methods reach `/.` routes. The return value is sent as JSON; `undefined` → 204.
+Errors thrown from the function are caught and returned as `{ error: message }` with 500.
+Argument parsing is safe — no `eval`; state-machine parser with a 2000-char decoded arg limit.
+`@Fn(name?)` accepts an optional alias: `@Fn('getUser')` registers as `/.getUser(...)`.
+**Implementation:** `src/decorators/fn.ts` (`@Fn`, `parseFunctionCall`, `parseFnArgs`),
+`VelocityApplication.functionRegistry` (Map populated during `registerController`),
+`VelocityApplication.dispatchFunction()` (intercepts `pathname.startsWith('/.')` in `handleRequest`).
