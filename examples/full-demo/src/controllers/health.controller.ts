@@ -1,4 +1,5 @@
-import { Controller, Get, VelocityRequest, VelocityResponse } from '@velocity/framework';
+import { Controller, Get } from '@velocity/framework';
+import type { VelocityRequest, VelocityResponse } from '@velocity/framework';
 import { velo } from '../../velo';
 
 @Controller('/health')

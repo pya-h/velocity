@@ -3,8 +3,8 @@ import {
   UseMiddleware, UseInterceptor,
   Validate, Validator,
   TransformInterceptor,
-  VelocityRequest, VelocityResponse, MiddlewareFunction,
 } from '@velocity/framework';
+import type { VelocityRequest, VelocityResponse, MiddlewareFunction } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
 import * as Joi from 'joi';
