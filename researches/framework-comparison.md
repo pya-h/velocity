@@ -1,15 +1,15 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-23 (updated)
+> Comparison date: 2026-04-27 (updated — Bun refactor)
 > Velocity version: 0.1.0
 
 ## At a Glance
 
 | | **Velocity** | **NestJS** | **Fastify** | **Hono** | **Elysia** | **Express** |
 |---|---|---|---|---|---|---|
-| Runtime | Node.js | Node.js | Node.js | Any (Node/Bun/Edge) | Bun only | Node.js |
+| Runtime | Node.js / **Bun** | Node.js | Node.js | Any (Node/Bun/Edge) | Bun only | Node.js |
 | Source size | 2K lines | ~90K lines | ~15K lines | ~20K lines | ~12K lines | ~3K lines |
-| Prod deps | 6 | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
+| Prod deps | 5 | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
 | TypeScript | Native, decorators | Native, decorators | Native, no decorators | Native, no decorators | Native, no decorators | @types bolt-on |
 | DI Container | Built-in (hierarchical) | Built-in (module-scoped) | No | No | No (derive/decorate) | No |
 | Built-in ORM | Yes (Prisma-like) | No (recommends TypeORM/Prisma) | No | No | No | No |
@@ -19,11 +19,12 @@
 
 ## Performance (relative)
 
-Absolute numbers are environment-dependent. What matters is **framework overhead vs raw Node.js http**:
+Absolute numbers are environment-dependent. What matters is **framework overhead vs the raw `http.createServer` on the same runtime**:
 
 | Framework | Overhead vs raw `http.createServer` | Why |
 |---|---|---|
-| **Velocity** | ~15% | URL parse + route match + response wrapping |
+| **Velocity (Bun)** | ~17% | URL parse + route match + response wrapping (measured: 14,142 vs 17,027 req/sec) |
+| **Velocity (Node.js)** | ~15% | Same overhead, slower absolute numbers (5,070 vs 5,990 req/sec) |
 | **Fastify** | ~10-15% | Highly optimized find-my-way router, schema compilation |
 | **Express** | ~40-50% | Regex-based routing, middleware chain per request |
 | **NestJS (Express)** | ~60-80% | Express overhead + DI resolution + guards/pipes/interceptors |
@@ -35,18 +36,24 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 | Framework | Idle RSS (small app) |
 |---|---|
-| **Velocity** | ~78 MB |
+| **Velocity (Bun)** | ~79 MB (measured: Bun runtime + bun:sqlite loaded; pg/mysql2 lazily skipped) |
 | **Express** | ~62 MB |
 | **Fastify** | ~45 MB |
 | **NestJS** | ~89 MB |
 | **Hono (Node)** | ~50 MB |
 | **Elysia (Bun)** | ~15 MB (Bun runtime) |
 
-Velocity's higher idle memory vs Express/Fastify comes from loading 3 database drivers (better-sqlite3, pg, mysql2) + winston + joi at import time. If these were lazy-loaded or peer deps, idle memory would drop significantly.
+Database drivers (pg, mysql2, bun:sqlite) are now **lazily loaded** via dynamic `import()` inside `connect()` — they are never imported unless the configured driver type is actually used. This means:
+
+- A process that never calls `connect()` (e.g. a test suite, a script, a microservice with no DB) pays zero driver overhead.
+- `bun:sqlite` is a Bun built-in (no disk I/O, resolves from internal registry).
+- `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache on all subsequent calls. Since `connect()` is called once at startup, there is no per-request overhead.
+
+Idle RSS on Bun (~79 MB) is similar to the old Node.js eager-load figure (~78 MB). This is expected: lazy loading removed pg and mysql2 (~10-15 MB), but Bun's runtime has a higher baseline than Node.js (~10-15 MB more). The net effect is roughly neutral on total RSS — the real win is that pg and mysql2 are **never loaded** when only SQLite is configured, meaning those packages don't exist in the process's loaded module graph at all.
 
 ## What Velocity Has That Others Don't
 
-- **Built-in ORM with Prisma-like API** — No external ORM needed. `db.User.findAll()` works out of the box. NestJS requires TypeORM/Prisma/Sequelize as separate packages.
+- **Built-in ORM with Prisma-like API** — No external ORM needed. `db.User.findAll()` works out of the box. NestJS requires TypeORM/Prisma/Sequelize as separate packages. DB drivers are lazily loaded — only the configured driver is ever imported, so unused drivers cost nothing at runtime.
 - **Envelocity** — Typed, read-only, nested `.env` wrapper with `OrThrow` getters. No equivalent in any listed framework without external packages.
 - **Velogen** — Generates typed DB interfaces from entity decorators. Similar concept to `prisma generate` but framework-native.
 - **Controller-on-controller scoping** — Mount controllers under other controllers' paths with inherited middleware. NestJS has module-level scoping but not path-level controller nesting.
@@ -58,7 +65,7 @@ Velocity's higher idle memory vs Express/Fastify comes from loading 3 database d
 |---|---|---|
 | Trie/radix router | Fastify, Hono, Elysia | Velocity uses linear scan — fine for <50 routes, slower after |
 | WebSocket support | All except Express | Not implemented |
-| Multi-runtime | Hono (10+ runtimes) | Node.js only |
+| Multi-runtime | Hono (10+ runtimes) | Node.js + Bun; not CF Workers / Deno / Edge |
 | OpenAPI/Swagger gen | NestJS, Fastify, Elysia | Not implemented |
 | Guards/Pipes | NestJS | Middleware + interceptors cover most cases |
 | Cookie/session | Express, NestJS, Fastify | Not implemented |
@@ -78,16 +85,27 @@ Velocity's higher idle memory vs Express/Fastify comes from loading 3 database d
 - **Raw throughput**: Fastify and Hono have heavily optimized routers (trie-based, compiled). Velocity's linear route scan is simpler but slower at scale.
 - **Ecosystem**: Express has 60K+ middleware packages. NestJS has 500+ official/community modules. Velocity has what's in `src/`.
 - **Production hardening**: The listed frameworks have years of production battle-testing, CVE patches, and edge-case handling. Velocity is new.
-- **Multi-runtime**: Hono runs on Cloudflare Workers, Deno, Bun, Lambda, Vercel Edge. Velocity is Node-only.
+- **Multi-runtime**: Hono runs on Cloudflare Workers, Deno, Bun, Lambda, Vercel Edge. Velocity runs on Node.js and Bun, but not edge/serverless runtimes.
 
 ## Bottom Line
 
-Velocity is closest in philosophy to **Fastify** (performance-focused, Node-native) but with the DX of **NestJS** (decorators, DI, structure) — without NestJS's module ceremony or dependency weight. The tradeoff is a smaller ecosystem and less production hardening. The ~15% overhead over raw http is competitive for a framework that includes DI, ORM, validation, and middleware.
+Velocity is closest in philosophy to **Fastify** (performance-focused, Node-native) but with the DX of **NestJS** (decorators, DI, structure) — without NestJS's module ceremony or dependency weight. Since the Bun migration, it runs natively on Bun with zero code changes: `bun run main.ts` works out of the box, `bun:sqlite` replaces the `better-sqlite3` native addon, and `bun test` replaces Node's test runner. On Bun it delivers **14,142 req/sec** (~17% overhead over raw `node:http` on Bun) — more than **2.8× faster** than the Node.js compiled baseline. The tradeoff is a smaller ecosystem and less production hardening.
 
 ## Benchmark Environment
 
+### Node.js (original)
 - Node.js v24.4.1
 - Linux 6.12.20-amd64
 - Tool: Apache Bench (`ab`)
 - Velocity measured: ~4,700 req/sec (via ts-node), ~5,070 req/sec (compiled)
 - Raw Node.js http baseline: ~5,990 req/sec (same environment)
+
+### Bun (current baseline)
+- Bun v1.3.13
+- Linux 6.12.20-amd64
+- Tool: Apache Bench (`ab -n 20000 -c 100 -l`)
+- Velocity measured: **~14,142 req/sec** (`bun run main.ts`, no compilation step)
+- Raw `node:http` on Bun baseline: **~17,027 req/sec**
+- Framework overhead: **~17%**
+- Idle RSS: **~79 MB** (only `bun:sqlite` loaded; `pg` and `mysql2` never imported)
+- Note: Velocity uses `node:http` compatibility layer, not `Bun.serve()` natively — switching to `Bun.serve()` would reduce overhead further

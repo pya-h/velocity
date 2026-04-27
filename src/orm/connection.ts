@@ -1,7 +1,4 @@
 import { DatabaseConfig } from '../types';
-import { Database } from 'bun:sqlite';
-import { Client as PgClient } from 'pg';
-import mysql from 'mysql2/promise';
 
 export class DatabaseConnection {
   private connection: any;
@@ -19,11 +16,13 @@ export class DatabaseConnection {
 
   public async connect(): Promise<void> {
     switch (this.config.type) {
-      case 'sqlite':
+      case 'sqlite': {
+        const { Database } = await import('bun:sqlite');
         this.connection = new Database(this.config.filename || ':memory:');
         break;
-      
-      case 'postgresql':
+      }
+      case 'postgresql': {
+        const { Client: PgClient } = await import('pg');
         this.connection = new PgClient({
           host: this.config.host || process.env.PGHOST || 'localhost',
           port: this.config.port || parseInt(process.env.PGPORT || '5432'),
@@ -33,8 +32,9 @@ export class DatabaseConnection {
         });
         await this.connection.connect();
         break;
-      
-      case 'mysql':
+      }
+      case 'mysql': {
+        const mysql = await import('mysql2/promise');
         this.connection = await mysql.createConnection({
           host: this.config.host || 'localhost',
           port: this.config.port || 3306,
@@ -43,7 +43,7 @@ export class DatabaseConnection {
           password: this.config.password || ''
         });
         break;
-      
+      }
       default:
         throw new Error(`Unsupported database type: ${this.config.type}`);
     }
