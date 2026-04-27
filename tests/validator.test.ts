@@ -3,6 +3,9 @@ import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
 import * as Joi from 'joi';
 import { Validator, Validate } from '../src/validation/validator';
 import { TestUtils } from '../src/testing/test-utils';
+import { VelocityApplication } from '../src/core/application';
+import { Controller } from '../src/decorators/controller';
+import { Post } from '../src/decorators/route';
 
 // ─── Validator class ─────────────────────────────────────────────────────────
 
@@ -89,56 +92,59 @@ class ValidatorSchemaTests {
   }
 }
 
-// ─── @Validate decorator ─────────────────────────────────────────────────────
+// ─── @Validate decorator (through pipeline) ─────────────────────────────────
 
 @Suite('@Validate decorator')
 class ValidateDecoratorTests {
-  private schema!: Joi.ObjectSchema;
+  private app!: VelocityApplication;
 
   @BeforeEach
   setup() {
-    this.schema = Validator.createSchema({ name: Joi.string().required() });
+    this.app = TestUtils.createTestApp();
   }
 
   @Test('returns 400 on invalid body')
   async rejects() {
-    class TestCtrl {
+    @Controller('/val-reject')
+    class Ctrl {
+      @Post('/')
       @Validate(Validator.createSchema({ name: Joi.string().required() }))
       async create(req: any, res: any) {
         return res.status(201).json({ ok: true });
       }
     }
+    this.app.register(Ctrl);
 
-    const ctrl = new TestCtrl();
-    const req  = TestUtils.createMockRequest({ body: { wrong: 'field' } });
-    const res  = TestUtils.createMockResponse();
-
-    await ctrl.create(req, res);
-
-    expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toBe('Validation failed');
+    const { status, body } = await TestUtils.makeRequest(this.app, {
+      method: 'POST',
+      path: '/val-reject',
+      body: { wrong: 'field' },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toBe('Validation failed');
   }
 
   @Test('passes validated body to handler on success')
   async passes() {
-    let handlerBody: any;
+    let receivedName: any;
 
-    class TestCtrl {
+    @Controller('/val-pass')
+    class Ctrl {
+      @Post('/')
       @Validate(Validator.createSchema({ name: Joi.string().required() }))
       async create(req: any, res: any) {
-        handlerBody = req.body;
+        receivedName = req.body.name;
         return res.status(201).json({ ok: true });
       }
     }
+    this.app.register(Ctrl);
 
-    const ctrl = new TestCtrl();
-    // Use a body that exactly matches the schema (no unknown keys — Joi 18 rejects them by default)
-    const req  = TestUtils.createMockRequest({ body: { name: 'Alice' } });
-    const res  = TestUtils.createMockResponse();
-
-    await ctrl.create(req, res);
-
-    expect(res.statusCode).toBe(201);
-    expect(handlerBody.name).toBe('Alice');
+    const { status } = await TestUtils.makeRequest(this.app, {
+      method: 'POST',
+      path: '/val-pass',
+      body: { name: 'Alice' },
+    });
+    expect(status).toBe(201);
+    expect(receivedName).toBe('Alice');
   }
 }

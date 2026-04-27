@@ -1,4 +1,10 @@
 import * as Joi from 'joi';
+import type { RouteMetadata } from '../types';
+
+const ROUTES_METADATA_KEY = Symbol.for('routes');
+const PENDING_SCHEMA_KEY = Symbol.for('pending_schema');
+
+export { PENDING_SCHEMA_KEY };
 
 export class Validator {
   public static validate<T>(schema: Joi.ObjectSchema<T>, data: any): { error?: string; value?: T } {
@@ -30,21 +36,18 @@ export class Validator {
 }
 
 export function Validate(schema: Joi.ObjectSchema) {
-  return function (_target: any, _propertyKey: string, descriptor?: PropertyDescriptor) {
-    if (!descriptor) return descriptor;
+  return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
+    const routes: RouteMetadata[] = Reflect.getMetadata(ROUTES_METADATA_KEY, target.constructor) || [];
+    const route = routes.find(r => r.handler === propertyKey);
 
-    const originalMethod = descriptor.value;
-
-    descriptor.value = async function (req: any, res: any, ...args: any[]) {
-      const { error, value } = Validator.validate(schema, req.body);
-
-      if (error) {
-        return res.status(400).json({ error: 'Validation failed', message: error });
-      }
-
-      req.body = value;
-      return originalMethod.apply(this, [req, res, ...args]);
-    };
+    if (route) {
+      route.schema = schema;
+    } else {
+      const pending: Map<string, any> =
+        Reflect.getMetadata(PENDING_SCHEMA_KEY, target.constructor) || new Map();
+      pending.set(propertyKey, schema);
+      Reflect.defineMetadata(PENDING_SCHEMA_KEY, pending, target.constructor);
+    }
 
     return descriptor;
   };

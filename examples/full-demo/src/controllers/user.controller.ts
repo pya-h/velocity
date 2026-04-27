@@ -10,7 +10,6 @@ import { db } from '../../db';
 import { velo } from '../../velo';
 import * as Joi from 'joi';
 
-// Guard: simple boolean check — cleaner than middleware for auth-only checks
 const authGuard: GuardFunction = (req) => !!req.headers['authorization'];
 
 const createUserSchema = Validator.createSchema({
@@ -21,23 +20,23 @@ const createUserSchema = Validator.createSchema({
 
 @Controller('/users')
 class UserController {
+  // ── Injection style: just `query` ─────────────────────────────────────────
+  // Only requests what it needs — no req/res boilerplate.
+  // Also sets a cookie via res (listed as second param).
   @Get('/')
   @Interceptors(TransformInterceptor)
-  async list(req: VelocityRequest, res: VelocityResponse) {
-    // Demo: set a cookie tracking the last visit time
+  async list(query: Record<string, string>, res: VelocityResponse) {
     res.setCookie('last-visit', new Date().toISOString(), {
-      httpOnly: true,
-      path: '/',
-      maxAge: 86400,
+      httpOnly: true, path: '/', maxAge: 86400,
     });
-
     const users = await db.User.findAll();
-    return { users, cookies: req.cookies };
+    return { users, query };
   }
 
+  // ── Injection style: just `param` ─────────────────────────────────────────
   @Get('/:id')
-  async getById(req: VelocityRequest, res: VelocityResponse) {
-    const id = parseInt(req.params!.id);
+  async getById(param: Record<string, string>, res: VelocityResponse) {
+    const id = parseInt(param.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
     const user = await db.User.findById(id);
@@ -45,17 +44,20 @@ class UserController {
     return { user };
   }
 
+  // ── Injection style: `body` + `res` ───────────────────────────────────────
+  // Body is auto-validated via @Validate schema. Handler receives validated body directly.
   @HttpPost('/')
   @Guards(authGuard)
   @Validate(createUserSchema)
-  async create(req: VelocityRequest, res: VelocityResponse) {
+  async create(body: any, res: VelocityResponse) {
     const user = await db.User.create({
-      ...req.body,
+      ...body,
       createdAt: new Date().toISOString()
     });
     return res.status(201).json({ user });
   }
 
+  // ── Injection style: classic `req` + `res` (backward compat) ──────────────
   @Delete('/:id')
   @Guards(authGuard)
   async remove(req: VelocityRequest, res: VelocityResponse) {
@@ -69,7 +71,7 @@ class UserController {
     return res.status(204).send('');
   }
 
-  // ── HTTP Functions (/. namespace) ───────────────────────────────────────
+  // ── HTTP Functions (/. namespace) — no injection, uses @Fn arg parsing ────
   @Fn()
   async findUser(id: number) {
     const user = await db.User.findById(id);

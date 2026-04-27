@@ -17,10 +17,63 @@ import {
 import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decorators/fn';
 import { WEBSOCKET_METADATA_KEY } from '../decorators/websocket';
+import { Validator } from '../validation/validator';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
 const SERVICE_METADATA_KEY = Symbol.for('service');
+
+// ─── Param-name injection ────────────────────────────────────────────────────
+// Parse handler parameter names from fn.toString() — runs once per route at startup.
+// Works because server-side code is never minified (param names survive TS compilation).
+
+const INJECTABLE_MAP: Record<string, string> = {
+  body: 'body',
+  param: 'params', params: 'params',
+  query: 'query',
+  cookie: 'cookies', cookies: 'cookies',
+  header: 'headers', headers: 'headers',
+  file: 'files', files: 'files',
+  user: 'user',
+  session: 'session',
+  req: 'req', request: 'req',
+  res: 'res', response: 'res',
+};
+
+type ArgBuilder = (req: VelocityRequest, res: VelocityResponse) => any;
+
+const ARG_BUILDER_MAP: Record<string, ArgBuilder> = {
+  body:    (req) => req.body,
+  params:  (req) => req.params,
+  query:   (req) => req.query,
+  cookies: (req) => req.cookies,
+  headers: (req) => req.headers,
+  files:   (req) => req.files,
+  user:    (req) => req.user,
+  session: (req) => req.session,
+  req:     (req) => req,
+  res:     (_, res) => res,
+};
+
+function parseHandlerParamNames(fn: Function): string[] {
+  const src = fn.toString();
+  const match = src.match(/^[^(]*\(([^)]*)\)/);
+  if (!match || !match[1].trim()) return [];
+  return match[1].split(',')
+    .map(p => {
+      const trimmed = p.trim();
+      if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return null;
+      // Strip rest operator, then extract name before : = or whitespace
+      const name = trimmed.replace(/^\.\.\./, '').split(/[\s:=]/)[0];
+      return name || null;
+    })
+    .filter(Boolean) as string[];
+}
+
+function resolveInjectable(name: string): string | null {
+  const clean = name.replace(/^_+/, ''); // strip leading underscores (_req → req)
+  return INJECTABLE_MAP[clean] || null;
+}
 
 // Shared response methods — allocated once, assigned by reference (no per-request closures)
 function _resJson(this: VelocityResponse, data: any) {
@@ -829,8 +882,7 @@ export class VelocityApplication {
         node = node.children.get(part)!;
       }
     }
-    const needsBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
-    const compiled = this.compileRouteHandler(controller, route, needsBody);
+    const compiled = this.compileRouteHandler(controller, route, method);
     node.handlers.set(method, { route, controller, compiled });
   }
 
@@ -880,21 +932,50 @@ export class VelocityApplication {
   private compileRouteHandler(
     controller: any,
     route: RouteMetadata,
-    needsBody: boolean,
+    httpMethod: string,
   ): CompiledRouteHandler {
     const method = route.handler;
     const guards = route.guards?.length ? route.guards : null;
     const middlewares = route.middlewares?.length ? route.middlewares : null;
     const interceptors = route.interceptors?.length ? route.interceptors : null;
     const uploadOpts = route.upload;
-    const parseBody = needsBody ? this.parseBody.bind(this) : null;
     const logger = this.logger;
 
-    // Fast path: GET-like route, no guards, no middleware, no interceptors
-    if (!guards && !middlewares && !interceptors && !parseBody) {
+    // ── Param-name injection (once per route at startup) ──
+    const paramNames = parseHandlerParamNames(controller[method]);
+    const injections = paramNames.map(n => resolveInjectable(n));
+    const argBuilders: ArgBuilder[] = injections.map(key =>
+      key ? (ARG_BUILDER_MAP[key] || (() => undefined)) : (() => undefined)
+    );
+
+    // Only parse body if HTTP method supports it AND handler uses body or req
+    const isBodyMethod = httpMethod === 'POST' || httpMethod === 'PUT' || httpMethod === 'PATCH';
+    const handlerUsesBody = injections.includes('body') || injections.includes('req');
+    const parseBody = (isBodyMethod && handlerUsesBody) ? this.parseBody.bind(this) : null;
+
+    // Validation: from @Validate schema on route, or DTO class with static `schema`
+    let validationSchema = route.schema || null;
+    if (!validationSchema) {
+      const bodyIdx = injections.indexOf('body');
+      if (bodyIdx !== -1) {
+        const paramTypes = Reflect.getMetadata('design:paramtypes', Object.getPrototypeOf(controller), method) || [];
+        const DtoClass = paramTypes[bodyIdx];
+        if (DtoClass?.schema) validationSchema = DtoClass.schema;
+      }
+    }
+
+    // Build args for the handler call
+    const hasArgs = argBuilders.length > 0;
+    const callHandler = hasArgs
+      ? (req: VelocityRequest, res: VelocityResponse) =>
+          controller[method](...argBuilders.map(fn => fn(req, res)))
+      : () => controller[method]();
+
+    // Fast path: no body, no guards, no middleware, no interceptors, no validation
+    if (!guards && !middlewares && !interceptors && !parseBody && !validationSchema) {
       return async (req, res) => {
         try {
-          const result = await controller[method](req, res);
+          const result = await callHandler(req, res);
           if (!res.headersSent) {
             if (result !== undefined) res.json(result);
             else res.status(204).send('');
@@ -911,10 +992,19 @@ export class VelocityApplication {
       };
     }
 
-    // General path: any combination of body/guards/middleware/interceptors
+    // General path
     return async (req, res) => {
       try {
         if (parseBody) req.body = await parseBody(req as any, uploadOpts);
+        // Validate body (from @Validate or DTO static schema)
+        if (validationSchema && req.body !== undefined) {
+          const { error, value } = Validator.validate(validationSchema, req.body);
+          if (error) {
+            if (!res.headersSent) res.status(400).json({ error: 'Validation failed', message: error });
+            return;
+          }
+          req.body = value; // apply Joi coercion
+        }
         // Guards run before middleware — return 403 if any guard rejects
         if (guards) {
           for (const guard of guards) {
@@ -935,7 +1025,7 @@ export class VelocityApplication {
             }
           }
         }
-        const result = await controller[method](req, res);
+        const result = await callHandler(req, res);
         let finalResult = result;
         if (interceptors) {
           for (const ic of interceptors) finalResult = await ic(finalResult, req, res);

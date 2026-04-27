@@ -67,6 +67,7 @@ export interface RouteMetadata {
   interceptors?: InterceptorFunction[];
   guards?: GuardFunction[];
   upload?: UploadOptions;
+  schema?: any;
 }
 
 export interface ControllerMetadata {

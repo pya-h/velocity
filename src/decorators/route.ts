@@ -5,6 +5,7 @@ const PENDING_MIDDLEWARES_KEY = Symbol.for('pending_middlewares');
 const PENDING_INTERCEPTORS_KEY = Symbol.for('pending_interceptors');
 const PENDING_GUARDS_KEY = Symbol.for('pending_guards');
 const PENDING_UPLOAD_KEY = Symbol.for('pending_upload');
+const PENDING_SCHEMA_KEY = Symbol.for('pending_schema');
 
 function createRouteDecorator(method: string) {
   return function (path: string = '') {
@@ -51,6 +52,15 @@ function createRouteDecorator(method: string) {
         route.upload = pendingUpload.get(propertyKey);
         pendingUpload.delete(propertyKey);
         Reflect.defineMetadata(PENDING_UPLOAD_KEY, pendingUpload, target.constructor);
+      }
+
+      // Merge any pending validation schema stored by @Validate that ran before us
+      const pendingSchema: Map<string, any> =
+        Reflect.getMetadata(PENDING_SCHEMA_KEY, target.constructor) || new Map();
+      if (pendingSchema.has(propertyKey)) {
+        route.schema = pendingSchema.get(propertyKey);
+        pendingSchema.delete(propertyKey);
+        Reflect.defineMetadata(PENDING_SCHEMA_KEY, pendingSchema, target.constructor);
       }
 
       routes.push(route);
