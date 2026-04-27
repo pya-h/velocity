@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection)
+> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -23,7 +23,7 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 | Framework | Overhead vs raw `http.createServer` | Why |
 |---|---|---|
-| **Velocity (Bun.serve())** | ~13% at c=200 | Adapter layer + route scan + response wrapping (15,522 vs 17,818 req/sec) |
+| **Velocity (Bun.serve())** | ~13% at c=200 | Adapter layer + response wrapping (15,522 vs 17,818 req/sec; trie router now in place) |
 | **Velocity (node:http / Node.js)** | ~15% | Same overhead, slower absolute (5,070 vs 5,990 req/sec) |
 | **Fastify** | ~10-15% | Highly optimized find-my-way router, schema compilation |
 | **Express** | ~40-50% | Regex-based routing, middleware chain per request |
@@ -67,7 +67,6 @@ Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node
 
 | Feature | Who has it | Velocity gap |
 |---|---|---|
-| Trie/radix router | Fastify, Hono, Elysia | Velocity uses linear scan — fine for <50 routes, slower after |
 | WebSocket support | All except Express | Not implemented |
 | Multi-runtime | Hono (10+ runtimes) | Node.js + Bun; not CF Workers / Deno / Edge |
 | OpenAPI/Swagger gen | NestJS, Fastify, Elysia | Not implemented |
@@ -88,7 +87,7 @@ Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node
 
 ## Where Velocity Loses
 
-- **Raw throughput**: Fastify and Hono have heavily optimized routers (trie-based, compiled). Velocity's linear route scan is simpler but slower at scale.
+- **Raw throughput**: Fastify and Hono have heavily optimized routers (character-level radix, compiled schemas). Velocity now uses a segment-trie (O(k) lookup) but the Bun adapter req/res shim still adds overhead vs truly zero-cost native routing.
 - **Ecosystem**: Express has 60K+ middleware packages. NestJS has 500+ official/community modules. Velocity has what's in `src/`.
 - **Production hardening**: The listed frameworks have years of production battle-testing, CVE patches, and edge-case handling. Velocity is new.
 - **Multi-runtime**: Hono runs on Cloudflare Workers, Deno, Bun, Lambda, Vercel Edge. Velocity runs on Node.js and Bun, but not edge/serverless runtimes.
@@ -114,4 +113,4 @@ Velocity is closest in philosophy to **Fastify** (performance-focused, Node-nati
 - Raw `Bun.serve()` baseline: **~17,818 req/sec**
 - Framework overhead: **~13%** (at c=200; rises to ~33% at c=100 due to adapter layer cost)
 - Idle RSS: **~75 MB no-DB / ~79 MB with SQLite** (winston removed; pg and mysql2 never imported)
-- Main remaining overhead sources: Bun adapter req/res shim, double URL parse, linear route scan (T-04/T-05)
+- Main remaining overhead sources: Bun adapter req/res shim, double URL parse (trie router now in place — route count no longer a factor)

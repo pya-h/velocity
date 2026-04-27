@@ -91,12 +91,26 @@ affects request latency — large route tables (50+) no longer degrade throughpu
 
 ---
 
-### T-06: DB connection pooling for `pg` and `mysql2`
+### T-06: DB connection pooling for `pg` and `mysql2` — DONE
 **Area:** Throughput (PostgreSQL / MySQL apps)
-`DatabaseConnection` creates a single `Client`/`Connection`. Under concurrent load, queries
-queue. Switch `pg.Client` → `pg.Pool` and `mysql2.createConnection` → `mysql2.createPool`.
-Add optional `pool: { min, max }` to `DatabaseConfig` (additive, backward-compatible).
-`bun:sqlite` unaffected (single-writer by design).
+`DatabaseConnection` previously created a single `pg.Client` / `mysql2.Connection`. Under
+concurrent load all queries serialised behind that one connection.
+
+**Changes:**
+- `pg.Client` → `pg.Pool` with `min` (default 2) and `max` (default 10) connections
+- `mysql2.createConnection` → `mysql2.createPool` with `connectionLimit` (default 10) and `waitForConnections: true`
+- Removed the manual `await this.connection.connect()` for pg (Pool manages connections lazily)
+- Added `pool?: { min?: number; max?: number }` to `DatabaseConfig` — purely additive, fully backward-compatible
+- `query`, `execute`, and `close` methods unchanged — `Pool` exposes the same `.query()`/`.execute()`/`.end()` API as the single connection objects
+- SQLite unaffected (single-writer by design; Bun's WAL mode handles concurrent reads)
+
+```typescript
+// zero migration cost — existing configs work without change
+export const db = DB({ type: 'postgresql', database: 'mydb', ... });
+
+// optional pool tuning
+export const db = DB({ type: 'postgresql', database: 'mydb', pool: { min: 5, max: 20 } });
+```
 
 ---
 

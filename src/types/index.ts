@@ -48,6 +48,10 @@ export interface DatabaseConfig {
   username?: string;
   password?: string;
   filename?: string; // For SQLite
+  pool?: {
+    min?: number; // pg only; ignored for mysql2 and sqlite
+    max?: number; // pg: default 10; mysql2 connectionLimit: default 10
+  };
 }
 
 export interface LoggerConfig {

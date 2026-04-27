@@ -21,25 +21,28 @@ export class DatabaseConnection {
         break;
       }
       case 'postgresql': {
-        const { Client: PgClient } = await import('pg');
-        this.connection = new PgClient({
+        const { Pool: PgPool } = await import('pg');
+        this.connection = new PgPool({
           host: this.config.host || process.env.PGHOST || 'localhost',
           port: this.config.port || parseInt(process.env.PGPORT || '5432'),
           database: this.config.database || process.env.PGDATABASE || 'postgres',
           user: this.config.username || process.env.PGUSER || 'postgres',
-          password: this.config.password || process.env.PGPASSWORD || ''
+          password: this.config.password || process.env.PGPASSWORD || '',
+          min: this.config.pool?.min ?? 2,
+          max: this.config.pool?.max ?? 10,
         });
-        await this.connection.connect();
         break;
       }
       case 'mysql': {
         const mysql = await import('mysql2/promise');
-        this.connection = await mysql.createConnection({
+        this.connection = mysql.createPool({
           host: this.config.host || 'localhost',
           port: this.config.port || 3306,
           database: this.config.database,
           user: this.config.username || 'root',
-          password: this.config.password || ''
+          password: this.config.password || '',
+          connectionLimit: this.config.pool?.max ?? 10,
+          waitForConnections: true,
         });
         break;
       }

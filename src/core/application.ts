@@ -622,6 +622,8 @@ export class VelocityApplication {
         const name = part.slice(1);
         if (!node.paramChild) {
           node.paramChild = { name, node: { children: new Map(), paramChild: null, handlers: new Map() } };
+        } else if (node.paramChild.name !== name) {
+          this.logger.warn(`Router: conflicting param names ":${node.paramChild.name}" and ":${name}" at same path level — using ":${node.paramChild.name}"`);
         }
         node = node.paramChild.node;
       } else {
@@ -648,11 +650,16 @@ export class VelocityApplication {
     if (index === parts.length) return node;
     const segment = parts[index];
 
-    // Literal match takes priority over param match
+    // Literal match takes priority over param match.
+    // Use a copy so params set inside a failed literal subtree don't bleed into the param branch.
     const literalChild = node.children.get(segment);
     if (literalChild) {
-      const result = this.walkTrie(literalChild, parts, index + 1, params);
-      if (result) return result;
+      const literalParams = { ...params };
+      const result = this.walkTrie(literalChild, parts, index + 1, literalParams);
+      if (result) {
+        Object.assign(params, literalParams);
+        return result;
+      }
     }
 
     if (node.paramChild) {
