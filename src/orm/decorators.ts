@@ -30,7 +30,7 @@ export function Column(options: {
 } = {}) {
   return function (target: any, propertyKey: string) {
     const columns: ColumnMetadata[] = Reflect.getMetadata(COLUMN_METADATA_KEY, target.constructor) || [];
-    
+
     const columnType = options.type || Reflect.getMetadata('design:type', target, propertyKey)?.name.toLowerCase() || 'text';
     
     const column: ColumnMetadata = {
@@ -50,7 +50,7 @@ export function Column(options: {
 export function PrimaryKey() {
   return function (target: any, propertyKey: string) {
     const columns: ColumnMetadata[] = Reflect.getMetadata(COLUMN_METADATA_KEY, target.constructor) || [];
-    
+
     const column: ColumnMetadata = {
       propertyName: propertyKey,
       columnName: propertyKey,
@@ -64,4 +64,3 @@ export function PrimaryKey() {
     Reflect.defineMetadata(COLUMN_METADATA_KEY, columns, target.constructor);
   };
 }
-

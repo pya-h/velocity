@@ -1,12 +1,13 @@
 import { VelocityApplication } from '../core/application';
 import { Container } from '../core/container';
+import type { ApplicationConfig } from '../types';
 
 export class TestUtils {
   /** Creates a VelocityApplication with logging suppressed — suitable for tests. */
-  public static createTestApp(config?: any): VelocityApplication {
+  public static createTestApp(config?: Partial<ApplicationConfig>): VelocityApplication {
     return new VelocityApplication({
       port: 0,
-      logger: { level: 'error' as const, format: 'simple' as const, outputs: [] as const },
+      logger: { level: 'error', format: 'simple', outputs: [] as ('console' | 'file')[] },
       ...config,
     });
   }
@@ -131,7 +132,7 @@ export class TestUtils {
       headers?: Record<string, string>;
     },
   ): Promise<{ status: number; headers: Record<string, string>; body: any }> {
-    await (app as any).prepareForTesting();
+    await app.prepareForTesting();
 
     const req = this.createMockRequest({
       method: options.method,

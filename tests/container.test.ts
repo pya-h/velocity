@@ -18,7 +18,7 @@ class ContainerTests {
   resolveInstance() {
     const obj = { hello: 'world' };
     this.container.register('greeting', obj);
-    expect(this.container.resolve('greeting')).toBe(obj);
+    expect(this.container.resolve('greeting') as unknown).toBe(obj);
   }
 
   @Test('resolves a registered class as singleton by default')
@@ -99,7 +99,7 @@ class ContainerTests {
   childInheritsParent() {
     this.container.register('shared', 'from-parent');
     const child = this.container.createChild();
-    expect(child.resolve('shared')).toBe('from-parent');
+    expect(child.resolve('shared') as unknown).toBe('from-parent');
   }
 
   @Test('child can override parent services locally')
@@ -107,8 +107,8 @@ class ContainerTests {
     this.container.register('key', 'parent');
     const child = this.container.createChild();
     child.register('key', 'child');
-    expect(child.resolve('key')).toBe('child');
-    expect(this.container.resolve('key')).toBe('parent');
+    expect(child.resolve('key') as unknown).toBe('child');
+    expect(this.container.resolve('key') as unknown).toBe('parent');
   }
 
   // ─── has() ───

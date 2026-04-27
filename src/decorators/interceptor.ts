@@ -23,7 +23,7 @@ function resolveInterceptorFunctions(interceptors: (InterceptorFunction | { new 
 }
 
 export function UseInterceptor(...interceptors: (InterceptorFunction | { new (...args: any[]): any })[]) {
-  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+  return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
     const interceptorFunctions = resolveInterceptorFunctions(interceptors);
 
     // Try to attach to existing route (if route decorator ran first)

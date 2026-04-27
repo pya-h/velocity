@@ -68,7 +68,7 @@ export class Container {
 
     let instance: T;
 
-    if (service.instance) {
+    if (service.instance !== undefined) {
       instance = service.instance;
     } else if (service.factory) {
       instance = service.factory();

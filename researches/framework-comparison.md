@@ -8,7 +8,7 @@
 | | **Velocity** | **NestJS** | **Fastify** | **Hono** | **Elysia** | **Express** |
 |---|---|---|---|---|---|---|
 | Runtime | Node.js / **Bun** | Node.js | Node.js | Any (Node/Bun/Edge) | Bun only | Node.js |
-| Source size | 2K lines | ~90K lines | ~15K lines | ~20K lines | ~12K lines | ~3K lines |
+| Source size | ~3.4K lines | ~90K lines | ~15K lines | ~20K lines | ~12K lines | ~3K lines |
 | Prod deps | **3** (joi + pg + mysql2) | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
 | TypeScript | Native, decorators | Native, decorators | Native, no decorators | Native, no decorators | Native, no decorators | @types bolt-on |
 | DI Container | Built-in (hierarchical) | Built-in (module-scoped) | No | No | No (derive/decorate) | No |
@@ -45,7 +45,7 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 | | Idle RSS | Notes |
 |---|---|---|
 | Raw `Bun.serve()` (no deps) | ~40–46 MB | JSC baseline — engine + JIT + GC infrastructure |
-| **Velocity (Bun, no DB)** | ~75 MB | Measured: framework + joi + reflect-metadata |
+| **Velocity (Bun, no DB)** | ~75 MB | Measured: framework + joi (internal Reflect polyfill; reflect-metadata removed T-09) |
 | **Velocity (Bun, SQLite)** | ~79 MB | Same + bun:sqlite (Bun built-in, no extra driver load) |
 | Elysia (Bun) | ~55–70 MB | Reported figures vary widely by measurement method |
 
@@ -92,7 +92,7 @@ The throughput advantage of Bun is in req/sec (15,522 vs ~5,070 req/sec), not in
 
 ## Where Velocity Wins
 
-- **Minimal footprint**: ~28 source files, ~2.5K lines. Entire framework is readable in an afternoon.
+- **Minimal footprint**: ~32 source files, ~3.4K lines. Entire framework is readable in an afternoon.
 - **Batteries-included ORM**: No need to install, configure, and wire up Prisma/TypeORM separately.
 - **DI without module boilerplate**: NestJS requires `@Module({ imports, controllers, providers })` for every feature. Velocity: just `velo.register(X)`.
 - **Type-safe env config**: Envelocity generates types from `.env` — zero runtime cost for type safety, OrThrow without function calls.

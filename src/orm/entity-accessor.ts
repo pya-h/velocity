@@ -136,14 +136,14 @@ export class EntityAccessor<T = any> {
 
   async count(conditions: Partial<T> = {}): Promise<number> {
     this.ensureInitialized();
-    let qb = new QueryBuilder(this.connection)
-      .select('COUNT(*) as count')
-      .from(this.metadata.tableName);
-
-    for (const [key, value] of Object.entries(conditions)) {
-      qb = qb.where(`${key} = ?`, value);
+    const entries = Object.entries(conditions as Record<string, any>);
+    const params: any[] = [];
+    let sql = `SELECT COUNT(*) as count FROM "${this.metadata.tableName}"`;
+    if (entries.length > 0) {
+      sql += ' WHERE ' + entries.map(([key]) => `"${key}" = ?`).join(' AND ');
+      params.push(...entries.map(([, v]) => v));
     }
-    const rows = await qb.execute();
+    const rows = await this.connection.query(sql, params);
     return rows[0]?.count ?? 0;
   }
 
