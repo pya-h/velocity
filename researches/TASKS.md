@@ -311,106 +311,76 @@ path — gated by `IS_BUN` in the constructor.
 
 ## Support Expanding
 
-### T-SE-07: File upload support
-**Who has it:** All major frameworks (Express via `multer`, Fastify via `@fastify/multipart`, NestJS via `@UploadedFile()`, Elysia natively).
-**Current state:** `parseBody()` treats `multipart/form-data` as raw text. The 1 MB `MAX_BODY_SIZE` cap also blocks any realistic file upload before parsing begins.
-
-**Approach:**
-- **Bun path:** `bunReq.formData()` parses multipart natively — zero new deps. Extract `File` entries into structured `UploadedFile` objects.
-- **Node path:** Use `busboy` (peer dep, ~40 KB, what `multer` uses internally) to stream-parse the multipart boundary.
-- Expose files on `req.files: Record<string, UploadedFile | UploadedFile[]>` (field name → file).
-- Add `@UploadedFile(field?)` parameter decorator — injects a single file from `req.files`.
-- Add `@UploadedFiles(field?)` parameter decorator — injects an array (multi-file fields).
-- Per-route upload size limit via `@Upload({ maxSize: number, maxFiles?: number })` — overrides the global 1 MB cap for that route only. Without this decorator, `multipart/form-data` requests still hit the 1 MB cap.
-- Buffer mode (default) — full file in memory as `Buffer`. Stream mode opt-in (`@Upload({ stream: true })`) — passes a readable stream; useful for large files piped directly to object storage.
-
+### T-SE-07: File upload support — DONE
+**Area:** DX / multipart handling
+Bun-native multipart parsing via `request.formData()`. Per-route size/file-count limits via
+`@Upload({ maxSize, maxFiles })`. Files exposed on `req.files: Record<string, UploadedFile | UploadedFile[]>`.
+Text fields from multipart become `req.body`.
 ```typescript
 @Post('/avatar')
-@Upload({ maxSize: 5 * 1024 * 1024 }) // 5 MB for this route
-async uploadAvatar(
-  @UploadedFile('avatar') file: UploadedFile,
-  req: VelocityRequest,
-) {
-  // file.buffer, file.originalname, file.mimetype, file.size
-  await storage.save(file.buffer, file.originalname);
-  return { url: `/uploads/${file.originalname}` };
-}
-
-@Post('/gallery')
-@Upload({ maxSize: 20 * 1024 * 1024, maxFiles: 10 })
-async uploadGallery(
-  @UploadedFiles('photos') photos: UploadedFile[],
-) {
-  return { count: photos.length };
+@Upload({ maxSize: 5 * 1024 * 1024 })
+async uploadAvatar(req: VelocityRequest) {
+  const file = req.files!.avatar as UploadedFile;
+  return { name: file.originalname, size: file.size };
 }
 ```
-
-**UploadedFile shape:**
-```typescript
-interface UploadedFile {
-  fieldname: string;
-  originalname: string;
-  mimetype: string;
-  size: number;
-  buffer: Buffer;      // buffer mode
-  stream?: Readable;   // stream mode only
-}
-```
-
-**Implementation:** `src/decorators/upload.ts` (`@Upload`, `@UploadedFile`, `@UploadedFiles`),
-`src/core/multipart.ts` (Bun-native + busboy Node fallback), wired into `parseBody()` / `handleRequest()`.
+**Implementation:** `src/decorators/upload.ts` (`@Upload`), multipart parsing in
+`application.ts:parseMultipartBun()`, wired into `parseBody()` via `uploadOpts` in compiled handler.
 
 ---
 
-### T-SE-01: WebSocket support
-**Who has it:** All major frameworks except Express.
-**Approach:** On Bun, `Bun.serve()` has built-in WebSocket support via the `websocket` option —
-zero extra deps. Add a `@WebSocket(path)` decorator and `velo.ws(path, handlers)` API.
-On Node, fall back to the `ws` package (peer dep).
+### T-SE-01: WebSocket support — DONE
+**Area:** Real-time / bidirectional
+Bun-native WebSocket via `Bun.serve({ websocket })`. `@WebSocket(path)` class decorator +
+`velo.registerWebSocket(GatewayClass)`. Gateway classes implement `onOpen(ws)`, `onMessage(ws, data)`,
+`onClose(ws, code, reason)`. Path-based dispatch via `ws.data.__wsPath`.
 ```typescript
 @WebSocket('/chat')
 class ChatGateway {
-  onMessage(ws: VelocitySocket, data: string) { ws.send(`echo: ${data}`); }
-  onClose(ws: VelocitySocket) { ... }
+  onOpen(ws: any)    { console.log('connected'); }
+  onMessage(ws: any, msg: string) { ws.send(`echo: ${msg}`); }
+  onClose(ws: any)   { console.log('disconnected'); }
 }
-velo.register(ChatGateway);
+velo.registerWebSocket(ChatGateway);
 ```
+**Implementation:** `src/decorators/websocket.ts`, `VelocityApplication.registerWebSocket()`,
+`bunFetchHandler` upgrade check, `listen()` websocket config wiring.
 
 ---
 
-### T-SE-02: OpenAPI / Swagger generation
-**Who has it:** NestJS, Fastify (via plugins), Elysia.
-**Approach:** Extend Velogen to emit an OpenAPI 3.1 spec from decorator metadata (`@Controller`,
-`@Get`/`@Post`/etc., `@Validate` schema). Output `openapi.json` alongside the generated types.
-Optionally serve it at `/api-docs` via `velo.serve('/api-docs', ...)`.
-No new runtime dep — pure code generation from existing metadata.
+### T-SE-02: OpenAPI / Swagger generation — DONE
+**Area:** DX / documentation
+Static analysis code generator (`scripts/velogen-openapi.js`) scans `@Controller` + route
+decorators, emits OpenAPI 3.1 `openapi.json`. Detects `@Validate` (400 responses),
+`@UseGuard` (403 + bearerAuth security scheme), `@Upload` (multipart request body),
+path parameters. Accessible via `velogen oa <dir>` or `velogen openapi <dir>`.
 
 ---
 
-### T-SE-03: Guards
-**Who has it:** NestJS.
-**Approach:** `@UseGuard(fn)` decorator — like middleware but returns `boolean` instead of
-calling `next()`. Guards run before route middleware. Cleaner than middleware for auth checks
-that need to block a request unconditionally.
+### T-SE-03: Guards — DONE
+**Area:** Auth / access control
+`@UseGuard(fn)` decorator — guard functions return `boolean`; `false` → 403 Forbidden.
+Guards run **before** middleware in the compiled handler. Follows the same pending-merge
+pattern as `@UseMiddleware` (works regardless of decorator order).
 ```typescript
 const authGuard = (req: VelocityRequest) => !!req.headers['authorization'];
 
 @Get('/protected')
 @UseGuard(authGuard)
-async protected(req, res) { ... }
+async protected(req: any, res: any) { ... }
 ```
-Simple to implement — one extra decorator + a guard-run loop before the middleware chain.
+**Implementation:** `src/decorators/guard.ts`, merged via `route.ts` pending guards,
+executed in `compileRouteHandler()`.
 
 ---
 
-### T-SE-04: Cookie and session support
-**Who has it:** Express, NestJS, Fastify.
-**Approach:**
-- Parse `Cookie` header into `req.cookies: Record<string, string>` in the request pipeline.
-- Add `res.setCookie(name, value, options)` helper.
-- Session: provide a `SessionMiddleware` that stores session data in memory (or pluggable store).
-No mandatory dep — cookie parsing is a small string operation; session store defaults to
-in-memory `Map`.
+### T-SE-04: Cookie and session support — DONE
+**Area:** DX / auth
+Lazy cookie parsing via `Object.defineProperty` getter on `req.cookies` — zero allocation
+for routes that don't read cookies. `res.setCookie(name, value, options)` builds a
+`Set-Cookie` header with full options (maxAge, expires, path, domain, secure, httpOnly, sameSite).
+Appends to existing `Set-Cookie` headers (multiple cookies per response).
+**Implementation:** `_parseCookies()` and `_resCookie()` shared helpers in `application.ts`.
 
 ---
 
@@ -481,57 +451,43 @@ Argument parsing is safe — no `eval`; state-machine parser with a 2000-char de
 
 ---
 
-### T-SE-08: Eden-like typed client generation (Elysia-inspired)
-**Who has it:** Elysia (Eden Treaty), tRPC.
-**Why it's popular:** Eden Treaty is one of Elysia's most cited features — developers can import
-a fully typed client on the frontend that knows every route's request and response types with
-**zero code generation** and no OpenAPI spec. It turns the backend into a type-safe SDK.
-**Approach:** Extend Velogen to generate a typed client module from controller/route decorator
-metadata. For each `@Get/@Post/...` route, emit a client method with the correct params, body,
-and return type inferred from the handler signature and `@Validate` schema:
+### T-SE-08: Eden-like typed client generation (Elysia-inspired) — DONE
+**Area:** DX / frontend integration
+Static analysis code generator (`scripts/velogen-client.js`) scans `@Controller` + route
+decorators, emits `velocity-client.ts` — a typed fetch wrapper grouped by controller namespace.
+Each route becomes a function with the correct path params, body arg, and options.
+Accessible via `velogen c <dir>` or `velogen client <dir>`. Supports `--base-url=` flag.
 ```typescript
 // Generated: velocity-client.ts
-export const api = {
-  users: {
-    getAll:  () => fetch('/users').then(r => r.json()) as Promise<User[]>,
-    getById: (id: string) => fetch(`/users/${id}`).then(r => r.json()) as Promise<User>,
-    create:  (body: CreateUserDto) => fetch('/users', { method: 'POST', body: JSON.stringify(body) })
-      .then(r => r.json()) as Promise<User>,
-  },
+export const user = {
+  list:    (opts?) => _fetch('GET', '/users/', undefined, opts),
+  getById: (id: string, opts?) => _fetch('GET', `/users/${id}`, undefined, opts),
+  create:  (body: any, opts?) => _fetch('POST', '/users/', body, opts),
 };
 ```
-Unlike Eden (which uses TypeScript type gymnastics at compile time), this would be code-generated
-like Prisma Client — simpler, no runtime overhead, works with any frontend framework.
-**Implementation:** Extend `scripts/velogen.ts` to read route metadata + Joi schemas → emit a
-typed fetch wrapper module.
 
 ---
 
-### T-SE-09: Lifecycle hooks (`onRequest`, `onResponse`, `onError`)
-**Who has it:** Elysia, Fastify, Hono.
-**Why it's popular:** Global lifecycle hooks let developers add cross-cutting concerns (logging,
-metrics, tracing, error formatting) without middleware. They're lighter than middleware because
-they don't participate in the next() chain — they're event callbacks.
-**Approach:**
+### T-SE-09: Lifecycle hooks (`onRequest`, `onResponse`, `onError`) — DONE
+**Area:** DX / observability
 ```typescript
-velo.onRequest((req) => { req.startTime = performance.now(); });
-velo.onResponse((req, res) => { console.log(`${req.method} ${req.url} — ${performance.now() - req.startTime}ms`); });
-velo.onError((error, req, res) => { /* custom error formatting */ });
+velo.onRequest((req) => { (req as any).startTime = performance.now(); });
+velo.onResponse((req, res) => { console.log(`${req.method} ${req.url} — ${performance.now() - (req as any).startTime}ms`); });
+velo.onError((error, req, res) => { res.status(500).json({ error: error.message }); });
 ```
-`onRequest` runs before routing. `onResponse` runs after the response is sent. `onError` replaces
-the default 500 handler. Stored as arrays on `VelocityApplication`; iterated in `handleRequest`.
-Cheap to implement — ~30 lines in `application.ts`.
+`onRequest` runs before routing. `onResponse` runs after the compiled handler completes.
+`onError` replaces the default 500 handler — if any `onError` hooks are registered, the
+default logger + 500 response is skipped entirely.
+**Implementation:** `_onRequest`, `_onResponse`, `_onError` arrays + public methods in
+`application.ts`; iterated in `handleRequest()`.
 
 ---
 
-### T-SE-10: Response compression (gzip / brotli)
-**Who has it:** All major frameworks (Express via `compression`, Fastify built-in, Elysia plugin).
-**Why it's popular:** Reduces response payload size by 60-80% for JSON/text responses. Essential
-for production APIs serving large payloads.
-**Approach:** On Bun, use the built-in `Bun.gzipSync()` / `Bun.deflateSync()` — zero deps.
-Check `Accept-Encoding` header; if `br` or `gzip` is present and response body exceeds a
-threshold (e.g. 1 KB), compress before sending. Add `Content-Encoding` and `Vary: Accept-Encoding`
-headers. Skip for already-compressed types (images, video).
-Config: `compression: { enabled: true, threshold: 1024 }` in `ApplicationConfig`.
-On Node: use `zlib.gzipSync()` / `zlib.brotliCompressSync()` (built-in, zero deps).
-**Implementation:** ~40 lines in `handleRequest()` / `bunFetchHandler()`, gated by config flag.
+### T-SE-10: Response compression (gzip) — DONE
+**Area:** Performance / payload size
+`compression: { enabled: true, threshold: 1024 }` in `ApplicationConfig`. On Bun, uses
+`Bun.gzipSync()` — zero deps. Compresses text-based responses (JSON, text, JS, XML) above
+the threshold. Sets `Content-Encoding: gzip` and `Vary: Accept-Encoding`. Checks
+`Accept-Encoding` header for `gzip` support. Skips binary/already-compressed types.
+**Implementation:** Compression in `createBunReqRes:getResponse()`. Config initialized in
+`listen()` and `prepareForTesting()`.

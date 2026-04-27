@@ -7,12 +7,15 @@ export interface VelocityRequest extends IncomingMessage {
   headers: Record<string, string | string[] | undefined>;
   user?: any;
   session?: any;
+  cookies?: Record<string, string>;
+  files?: Record<string, UploadedFile | UploadedFile[]>;
 }
 
 export interface VelocityResponse extends ServerResponse {
   json(data: any): void;
   status(code: number): VelocityResponse;
   send(data: any): void;
+  setCookie(name: string, value: string, options?: CookieOptions): VelocityResponse;
 }
 
 export interface RouteHandler {
@@ -27,12 +30,43 @@ export interface InterceptorFunction {
   (data: any, req: VelocityRequest, res: VelocityResponse): Promise<any> | any;
 }
 
+export type GuardFunction = (req: VelocityRequest) => boolean | Promise<boolean>;
+
+export type OnRequestHook = (req: VelocityRequest) => void | Promise<void>;
+export type OnResponseHook = (req: VelocityRequest, res: VelocityResponse) => void | Promise<void>;
+export type OnErrorHook = (error: Error, req: VelocityRequest, res: VelocityResponse) => void | Promise<void>;
+
+export interface CookieOptions {
+  maxAge?: number;
+  expires?: Date;
+  path?: string;
+  domain?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: 'Strict' | 'Lax' | 'None';
+}
+
+export interface UploadedFile {
+  fieldname: string;
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export interface UploadOptions {
+  maxSize?: number;
+  maxFiles?: number;
+}
+
 export interface RouteMetadata {
   path: string;
   method: string;
   handler: string;
   middlewares?: MiddlewareFunction[];
   interceptors?: InterceptorFunction[];
+  guards?: GuardFunction[];
+  upload?: UploadOptions;
 }
 
 export interface ControllerMetadata {
@@ -88,6 +122,12 @@ export interface ApplicationConfig {
     /** Auto-register SIGTERM/SIGINT handlers that call close() + process.exit(). Default: false */
     auto?: boolean;
   };
+  compression?: {
+    /** Enable response compression. Default: false */
+    enabled?: boolean;
+    /** Minimum response size in bytes to compress. Default: 1024 */
+    threshold?: number;
+  };
 }
 
 export interface EntityMetadata {
@@ -104,4 +144,15 @@ export interface ColumnMetadata {
   nullable: boolean;
   unique: boolean;
   primaryKey: boolean;
+}
+
+export interface VelocitySocket {
+  send(data: string | ArrayBuffer | Uint8Array): void;
+  close(code?: number, reason?: string): void;
+  data: any;
+}
+
+export interface WebSocketMetadata {
+  path: string;
+  target: any;
 }

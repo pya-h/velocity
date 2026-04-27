@@ -1,136 +1,96 @@
 #!/usr/bin/env node
 /**
- * velogen — Velocity Type Generator
+ * velogen — Velocity Code Generator CLI
  *
- * Generates TypeScript types for Database instances based on registered entities.
- * Eliminates `as any` casts when accessing db.EntityName.
+ * Unified entry point for all Velocity code generation tools.
  *
  * Usage:
- *   npx velogen <project-dir>
- *   npm run velogen -- examples/full-demo
+ *   velogen <command> <project-dir> [options]
  *
- * What it does:
- *   1. Scans for *.entity.ts files to find @Entity classes
- *   2. Finds db.register(Entity) calls to map entities → DB variables
- *   3. Generates a velocity-types.d.ts with typed DB interfaces
+ * Commands:
+ *   types   | t    Generate typed DB interfaces from @Entity files
+ *   env     | e    Generate typed .env config (Envelocity)
+ *   openapi | oa   Generate OpenAPI 3.1 spec from @Controller routes
+ *   client  | c    Generate typed fetch client from @Controller routes
+ *   api     | a    Generate interactive API testing UI from controllers
+ *   all            Run all generators
  *
- * After running, update your db.ts to use the generated type:
- *   import type { TypedDb } from './velo/velocity-types';
- *   export const db = DB({ ... }) as TypedDb;
+ * Examples:
+ *   velogen types examples/full-demo
+ *   velogen oa examples/full-demo
+ *   velogen all examples/full-demo
+ *   velogen c examples/full-demo --base-url=http://localhost:3000
  */
 
-const fs = require('fs');
+const { execSync } = require('child_process');
 const path = require('path');
 
-// ─── Arg parsing ───
-const targetDir = process.argv[2];
-if (!targetDir) {
-  console.error('Usage: velogen <project-directory>');
-  console.error('  e.g.: npm run velogen -- examples/full-demo');
+const COMMANDS = {
+  types:   'velogen-types.js',   t:  'velogen-types.js',   type:    'velogen-types.js',
+  env:     'velogen-env.js',     e:  'velogen-env.js',
+  openapi: 'velogen-openapi.js', oa: 'velogen-openapi.js', swagger: 'velogen-openapi.js',
+  client:  'velogen-client.js',  c:  'velogen-client.js',
+  api:     'velogen-api.js',     a:  'velogen-api.js',     apitester: 'velogen-api.js',
+};
+
+const ALL_SCRIPTS = ['velogen-types.js', 'velogen-env.js', 'velogen-openapi.js', 'velogen-client.js', 'velogen-api.js'];
+
+const args = process.argv.slice(2);
+const command = args[0];
+const rest = args.slice(1);
+
+function showUsage() {
+  console.log('velogen — Velocity Code Generator');
+  console.log('');
+  console.log('Usage: velogen <command> <project-dir> [options]');
+  console.log('');
+  console.log('Commands:');
+  console.log('  types   | t     DB type interfaces');
+  console.log('  env     | e     Envelocity typed .env config');
+  console.log('  openapi | oa    OpenAPI 3.1 spec');
+  console.log('  client  | c     Typed fetch client');
+  console.log('  api     | a     Interactive API tester UI');
+  console.log('  all             Run all generators');
+  console.log('');
+  console.log('Examples:');
+  console.log('  velogen t examples/full-demo');
+  console.log('  velogen all examples/full-demo');
   process.exit(1);
 }
 
-const projectDir = path.resolve(targetDir);
-if (!fs.existsSync(projectDir)) {
-  console.error(`Directory not found: ${projectDir}`);
-  process.exit(1);
-}
-
-// ─── Scan helpers ───
-
-function findFiles(dir, pattern) {
-  const results = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'velo') {
-      results.push(...findFiles(fullPath, pattern));
-    } else if (entry.isFile() && pattern.test(entry.name)) {
-      results.push(fullPath);
-    }
+function run(script, passArgs) {
+  const scriptPath = path.join(__dirname, script);
+  const cmd = `node "${scriptPath}" ${passArgs.map(a => `"${a}"`).join(' ')}`;
+  try {
+    execSync(cmd, { stdio: 'inherit' });
+  } catch {
+    // Sub-script already printed its error; don't exit on `all`
   }
-  return results;
 }
 
-// ─── Parse entity files ───
-
-function parseEntityFile(filePath) {
-  const content = fs.readFileSync(filePath, 'utf-8');
-
-  // Must have @Entity decorator
-  if (!/@Entity\s*\(/.test(content)) return null;
-
-  // Extract class name
-  const classMatch = content.match(/(?:export\s+)?class\s+(\w+)/);
-  if (!classMatch) return null;
-  const className = classMatch[1];
-
-  // Extract db variable from: someVar.register(ClassName)
-  const registerMatch = content.match(/(\w+)\.register\s*\(\s*(\w+)\s*\)/);
-  if (!registerMatch || registerMatch[2] !== className) return null;
-
-  return { className, dbVar: registerMatch[1], filePath };
+if (!command) {
+  showUsage();
 }
 
-// ─── Main ───
-
-const entityFiles = findFiles(projectDir, /\.entity\.ts$/);
-if (entityFiles.length === 0) {
-  console.log('No *.entity.ts files found.');
+if (command === 'all') {
+  if (rest.length === 0) {
+    console.error('Usage: velogen all <project-dir>');
+    process.exit(1);
+  }
+  console.log('velogen: running all generators...\n');
+  for (const script of ALL_SCRIPTS) {
+    run(script, rest);
+    console.log('');
+  }
+  console.log('velogen: all done.');
   process.exit(0);
 }
 
-const entities = entityFiles.map(parseEntityFile).filter(Boolean);
-if (entities.length === 0) {
-  console.log('No entities with db.register() found.');
-  process.exit(0);
-}
-
-// Group entities by DB variable
-const entityGroups = new Map();
-for (const entity of entities) {
-  if (!entityGroups.has(entity.dbVar)) {
-    entityGroups.set(entity.dbVar, []);
-  }
-  entityGroups.get(entity.dbVar).push(entity);
-}
-
-// ─── Generate output ───
-
-const outputDir = path.join(projectDir, 'velo');
-fs.mkdirSync(outputDir, { recursive: true });
-
-const outputFile = path.join(outputDir, 'velocity-types.d.ts');
-
-let output = `// Auto-generated by velogen — do not edit manually\n`;
-output += `// Re-run: npm run velogen -- ${path.relative(process.cwd(), projectDir)}\n\n`;
-output += `import type { EntityAccessor, Database } from '@velocity/framework';\n`;
-
-// Import each entity class
-for (const entity of entities) {
-  const relPath = path.relative(outputDir, entity.filePath).replace(/\.ts$/, '');
-  const importPath = relPath.startsWith('.') ? relPath : './' + relPath;
-  output += `import type { ${entity.className} } from '${importPath}';\n`;
-}
-
-output += `\n`;
-
-// Generate typed interface for each DB variable
-for (const [dbVar, dbEntities] of entityGroups) {
-  const interfaceName = `Typed${dbVar.charAt(0).toUpperCase() + dbVar.slice(1)}`;
-
-  output += `/** Typed database interface for \`${dbVar}\` */\n`;
-  output += `export interface ${interfaceName} extends Database {\n`;
-  for (const entity of dbEntities) {
-    output += `  readonly ${entity.className}: EntityAccessor<${entity.className}>;\n`;
-  }
-  output += `}\n`;
-}
-
-fs.writeFileSync(outputFile, output);
-
-console.log(`velogen: generated ${path.relative(process.cwd(), outputFile)}`);
-console.log(`  ${entities.length} entities across ${entityGroups.size} database(s)`);
-for (const [dbVar, dbEntities] of entityGroups) {
-  const interfaceName = `Typed${dbVar.charAt(0).toUpperCase() + dbVar.slice(1)}`;
-  console.log(`  ${dbVar} -> ${interfaceName}: ${dbEntities.map(e => e.className).join(', ')}`);
+const script = COMMANDS[command];
+if (script) {
+  run(script, rest);
+} else {
+  // Backward compat: if first arg looks like a directory, assume `types`
+  console.warn(`velogen: unknown command "${command}" — assuming "types" (backward compat)`);
+  run('velogen-types.js', args);
 }

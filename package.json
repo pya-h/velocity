@@ -9,8 +9,6 @@
     "sync": "bun scripts/sync.js",
     "dev": "bun run build && bun run sync",
     "velogen": "bun scripts/velogen.js",
-    "envgen": "bun scripts/envgen.js",
-    "apitester": "bun scripts/apitester.js",
     "demo": "cd examples/full-demo && bun run main.ts",
     "test": "bun test"
   },

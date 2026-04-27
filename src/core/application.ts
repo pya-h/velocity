@@ -10,9 +10,13 @@ import { Database, _setCurrentApp } from '../orm/database';
 import {
   VelocityRequest, VelocityResponse, ApplicationConfig,
   RouteMetadata, ControllerMetadata, RegisterOptions,
+  CookieOptions, UploadedFile, UploadOptions,
+  OnRequestHook, OnResponseHook, OnErrorHook,
+  WebSocketMetadata,
 } from '../types';
 import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decorators/fn';
+import { WEBSOCKET_METADATA_KEY } from '../decorators/websocket';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
@@ -34,6 +38,36 @@ function _resSend(this: VelocityResponse, data: any) {
   } else {
     this.json(data);
   }
+}
+
+function _resCookie(this: VelocityResponse, name: string, value: string, options?: CookieOptions) {
+  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+  if (options?.maxAge !== undefined) cookie += `; Max-Age=${options.maxAge}`;
+  if (options?.expires) cookie += `; Expires=${options.expires.toUTCString()}`;
+  if (options?.path) cookie += `; Path=${options.path}`;
+  if (options?.domain) cookie += `; Domain=${options.domain}`;
+  if (options?.secure) cookie += '; Secure';
+  if (options?.httpOnly) cookie += '; HttpOnly';
+  if (options?.sameSite) cookie += `; SameSite=${options.sameSite}`;
+  const existing = this.getHeader('Set-Cookie');
+  const cookies = existing
+    ? (Array.isArray(existing) ? [...existing, cookie] : [existing as string, cookie])
+    : cookie;
+  this.setHeader('Set-Cookie', cookies);
+  return this;
+}
+
+function _parseCookies(header: string | undefined): Record<string, string> {
+  if (!header) return {};
+  const result: Record<string, string> = {};
+  for (const pair of header.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    const key = decodeURIComponent(pair.slice(0, eq).trim());
+    const val = decodeURIComponent(pair.slice(eq + 1).trim());
+    result[key] = val;
+  }
+  return result;
 }
 
 interface PendingRegistration {
@@ -80,6 +114,12 @@ export class VelocityApplication {
     /** Same as fixedHeaders but as an object — used by Bun static responses. */
     fixedHeadersObj: Record<string, string>;
   } | null = null;
+  private _onRequest: OnRequestHook[] = [];
+  private _onResponse: OnResponseHook[] = [];
+  private _onError: OnErrorHook[] = [];
+  private wsGateways = new Map<string, any>();
+  private compressionEnabled = false;
+  private compressionThreshold = 1024;
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -407,17 +447,45 @@ export class VelocityApplication {
     this.initializeRegistrations();
     this.buildTrie();
     this.buildCorsPrecomputed();
+
+    // Init compression config
+    const compCfg = this.config.get('compression');
+    if (compCfg?.enabled) {
+      this.compressionEnabled = true;
+      this.compressionThreshold = compCfg.threshold ?? 1024;
+    }
+
     this.ready = true;
     await this.initializeDatabases();
 
     this.logger.info('Application initialized successfully');
 
     if (IS_BUN) {
-      this.server = Bun.serve({
+      const bunServeOpts: any = {
         port: finalPort,
         hostname: finalHost,
-        fetch: (request: Request) => this.bunFetchHandler(request),
-      });
+        fetch: (request: Request, server: any) => this.bunFetchHandler(request, server),
+      };
+
+      // Wire WebSocket gateways into Bun.serve()
+      if (this.wsGateways.size > 0) {
+        bunServeOpts.websocket = {
+          open: (ws: any) => {
+            const gw = this.wsGateways.get(ws.data?.__wsPath);
+            if (gw?.onOpen) gw.onOpen(ws);
+          },
+          message: (ws: any, message: any) => {
+            const gw = this.wsGateways.get(ws.data?.__wsPath);
+            if (gw?.onMessage) gw.onMessage(ws, message);
+          },
+          close: (ws: any, code: number, reason: string) => {
+            const gw = this.wsGateways.get(ws.data?.__wsPath);
+            if (gw?.onClose) gw.onClose(ws, code, reason);
+          },
+        };
+      }
+
+      this.server = Bun.serve(bunServeOpts);
       this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
       this.startGoMethods();
       this.maybeRegisterSignalHandlers();
@@ -496,12 +564,34 @@ export class VelocityApplication {
     this.initializeRegistrations();
     this.buildTrie();
     this.buildCorsPrecomputed();
+    const compCfg = this.config.get('compression');
+    if (compCfg?.enabled) {
+      this.compressionEnabled = true;
+      this.compressionThreshold = compCfg.threshold ?? 1024;
+    }
     this.ready = true;
     return this;
   }
 
   public getContainer(): Container {
     return this.container;
+  }
+
+  // ─── Lifecycle hooks ───
+
+  public onRequest(hook: OnRequestHook): this { this._onRequest.push(hook); return this; }
+  public onResponse(hook: OnResponseHook): this { this._onResponse.push(hook); return this; }
+  public onError(hook: OnErrorHook): this { this._onError.push(hook); return this; }
+
+  // ─── WebSocket registration ───
+
+  public registerWebSocket(gatewayClass: any): this {
+    const meta: WebSocketMetadata = Reflect.getMetadata(WEBSOCKET_METADATA_KEY, gatewayClass);
+    if (!meta) throw new Error(`${gatewayClass.name} is not decorated with @WebSocket`);
+    const instance = this.container.resolve(gatewayClass);
+    this.wsGateways.set(meta.path, instance);
+    this.logger.info(`Registered WebSocket gateway: ${gatewayClass.name} at ${meta.path}`);
+    return this;
   }
 
   // ─── Request handling ───
@@ -520,9 +610,23 @@ export class VelocityApplication {
     const velocityRes = this.enhanceResponse(res);
 
     try {
+      // Lifecycle: onRequest hooks
+      for (const hook of this._onRequest) await hook(velocityReq);
+
       const url: URL = (req as any).__parsedUrl || new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       const pathname = url.pathname;
       const method = req.method?.toUpperCase() || 'GET';
+
+      // Cookie parsing — lazy, only allocates on first access
+      Object.defineProperty(velocityReq, 'cookies', {
+        get() {
+          const val = _parseCookies((req.headers.cookie ?? req.headers.Cookie) as string | undefined);
+          Object.defineProperty(this, 'cookies', { value: val, writable: true, enumerable: true, configurable: true });
+          return val;
+        },
+        enumerable: true,
+        configurable: true,
+      });
 
       if (this.corsPrecomputed) {
         const cors = this.corsPrecomputed;
@@ -549,6 +653,8 @@ export class VelocityApplication {
 
       if (pathname.startsWith('/.')) {
         await this.dispatchFunction(pathname, velocityReq, velocityRes);
+        // Lifecycle: onResponse hooks
+        for (const hook of this._onResponse) await hook(velocityReq, velocityRes);
         return;
       }
 
@@ -556,21 +662,30 @@ export class VelocityApplication {
 
       if (!match) {
         velocityRes.status(404).json({ error: 'Route not found' });
+        for (const hook of this._onResponse) await hook(velocityReq, velocityRes);
         return;
       }
 
       velocityReq.params = match.params;
 
-      // Compiled handler includes body parsing, middleware, interceptors, error handling
+      // Compiled handler includes body parsing, guards, middleware, interceptors, error handling
       await match.compiled(velocityReq, velocityRes);
 
+      // Lifecycle: onResponse hooks
+      for (const hook of this._onResponse) await hook(velocityReq, velocityRes);
+
     } catch (error) {
-      this.logger.error('Request handling error:', error);
-      if (!velocityRes.headersSent) {
-        velocityRes.status(500).json({
-          error: 'Internal Server Error',
-          message: error instanceof Error ? error.message : 'Unknown error'
-        });
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (this._onError.length > 0) {
+        for (const hook of this._onError) await hook(err, velocityReq, velocityRes);
+      } else {
+        this.logger.error('Request handling error:', error);
+        if (!velocityRes.headersSent) {
+          velocityRes.status(500).json({
+            error: 'Internal Server Error',
+            message: err.message,
+          });
+        }
       }
     }
   }
@@ -580,16 +695,23 @@ export class VelocityApplication {
     velocityRes.json = _resJson;
     velocityRes.status = _resStatus;
     velocityRes.send = _resSend;
+    velocityRes.setCookie = _resCookie;
     return velocityRes;
   }
 
-  private async parseBody(req: IncomingMessage): Promise<any> {
-    const MAX_BODY_SIZE = 1024 * 1024;
+  private async parseBody(req: IncomingMessage, uploadOpts?: UploadOptions): Promise<any> {
+    const maxSize = uploadOpts?.maxSize || 1024 * 1024; // default 1 MB, overridable per route
     const bunReq: Request | undefined = (req as any).__bunNativeRequest;
+
     if (bunReq) {
       const cl = parseInt(bunReq.headers.get('content-length') || '0', 10);
-      if (cl > MAX_BODY_SIZE) throw new Error('Request body too large');
+      if (cl > maxSize) throw new Error('Request body too large');
       const ct = bunReq.headers.get('content-type') || '';
+
+      // Multipart: use native formData() on Bun
+      if (ct.includes('multipart/form-data')) {
+        return this.parseMultipartBun(bunReq, req as any, uploadOpts);
+      }
       if (ct.includes('application/json')) return bunReq.json().catch(() => ({}));
       return bunReq.text().catch(() => '');
     }
@@ -601,7 +723,7 @@ export class VelocityApplication {
       req.on('data', (chunk: Buffer | string) => {
         const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
         size += buf.length;
-        if (size > MAX_BODY_SIZE) {
+        if (size > maxSize) {
           req.destroy();
           reject(new Error('Request body too large'));
           return;
@@ -623,6 +745,39 @@ export class VelocityApplication {
       });
       req.on('error', reject);
     });
+  }
+
+  private async parseMultipartBun(bunReq: Request, velocityReq: VelocityRequest, opts?: UploadOptions): Promise<any> {
+    const formData = await bunReq.formData();
+    const body: Record<string, any> = {};
+    const files: Record<string, UploadedFile | UploadedFile[]> = {};
+    let fileCount = 0;
+    const maxFiles = opts?.maxFiles ?? Infinity;
+
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File) {
+        if (++fileCount > maxFiles) throw new Error(`Too many files (max ${maxFiles})`);
+        const buf = Buffer.from(await value.arrayBuffer());
+        const file: UploadedFile = {
+          fieldname: key,
+          originalname: value.name,
+          mimetype: value.type,
+          size: buf.length,
+          buffer: buf,
+        };
+        const existing = files[key];
+        if (existing) {
+          files[key] = Array.isArray(existing) ? [...existing, file] : [existing, file];
+        } else {
+          files[key] = file;
+        }
+      } else {
+        body[key] = value;
+      }
+    }
+
+    velocityReq.files = files;
+    return body;
   }
 
   private async dispatchFunction(pathname: string, _req: VelocityRequest, res: VelocityResponse): Promise<void> {
@@ -728,13 +883,15 @@ export class VelocityApplication {
     needsBody: boolean,
   ): CompiledRouteHandler {
     const method = route.handler;
+    const guards = route.guards?.length ? route.guards : null;
     const middlewares = route.middlewares?.length ? route.middlewares : null;
     const interceptors = route.interceptors?.length ? route.interceptors : null;
+    const uploadOpts = route.upload;
     const parseBody = needsBody ? this.parseBody.bind(this) : null;
     const logger = this.logger;
 
-    // Fast path: GET-like route, no middleware, no interceptors
-    if (!middlewares && !interceptors && !parseBody) {
+    // Fast path: GET-like route, no guards, no middleware, no interceptors
+    if (!guards && !middlewares && !interceptors && !parseBody) {
       return async (req, res) => {
         try {
           const result = await controller[method](req, res);
@@ -754,10 +911,20 @@ export class VelocityApplication {
       };
     }
 
-    // General path: any combination of body/middleware/interceptors
+    // General path: any combination of body/guards/middleware/interceptors
     return async (req, res) => {
       try {
-        if (parseBody) req.body = await parseBody(req as any);
+        if (parseBody) req.body = await parseBody(req as any, uploadOpts);
+        // Guards run before middleware — return 403 if any guard rejects
+        if (guards) {
+          for (const guard of guards) {
+            const allowed = await guard(req);
+            if (!allowed) {
+              if (!res.headersSent) res.status(403).json({ error: 'Forbidden' });
+              return;
+            }
+          }
+        }
         if (middlewares) {
           for (const mw of middlewares) {
             let nextCalled = false;
@@ -880,11 +1047,18 @@ export class VelocityApplication {
 
   // ─── Bun.serve() adapter ───
 
-  private async bunFetchHandler(request: Request): Promise<Response> {
+  private async bunFetchHandler(request: Request, server?: any): Promise<Response> {
+    const reqUrl = new URL(request.url);
+    const pathname = reqUrl.pathname;
+
+    // WebSocket upgrade — must happen before activeRequests tracking
+    if (server && this.wsGateways.has(pathname)) {
+      const upgraded = server.upgrade(request, { data: { __wsPath: pathname } });
+      if (upgraded) return undefined as any; // Bun expects no Response on upgrade
+    }
+
     this.activeRequests++;
     try {
-      const reqUrl = new URL(request.url);
-      const pathname = reqUrl.pathname;
       const method = request.method.toUpperCase();
 
       if (method === 'GET') {
@@ -1025,11 +1199,28 @@ export class VelocityApplication {
       json: _resJson,
       status: _resStatus,
       send: _resSend,
+      setCookie: _resCookie,
     };
 
     const res = rawRes as unknown as VelocityResponse;
-    const getResponse = (): Response =>
-      new Response(_body || null, { status: _status, headers: _headers });
+    const compress = this.compressionEnabled;
+    const threshold = this.compressionThreshold;
+    const acceptEnc = request.headers.get('accept-encoding') || '';
+
+    const getResponse = (): Response => {
+      // Response compression (gzip) — Bun path
+      if (compress && _body && _body.length >= threshold && acceptEnc.includes('gzip')) {
+        const ct = _headers['content-type'] || '';
+        // Only compress text-based responses
+        if (ct.includes('json') || ct.includes('text') || ct.includes('javascript') || ct.includes('xml')) {
+          const compressed = Bun.gzipSync(Buffer.from(_body));
+          _headers['content-encoding'] = 'gzip';
+          _headers['vary'] = 'Accept-Encoding';
+          return new Response(compressed, { status: _status, headers: _headers });
+        }
+      }
+      return new Response(_body || null, { status: _status, headers: _headers });
+    };
 
     return { req: req as VelocityRequest, res, getResponse };
   }
