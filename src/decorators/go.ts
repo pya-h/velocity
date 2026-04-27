@@ -26,13 +26,13 @@ function detectCallerFile(): string | undefined {
            || line.match(/^\s+at\s+(.+\.[tj]s):\d+:\d+\s*$/);
     if (!m) continue;
     const file = m[1];
-    if (!passedGoFrame) {
-      // Mark once we've seen this decorator's own frame
-      if (file.includes('decorators/go')) { passedGoFrame = true; }
+    const isGoFrame = file.includes('decorators/go');
+    if (isGoFrame) {
+      passedGoFrame = true;
       continue;
     }
-    // First frame after the go.ts frame is the user's service file
-    return file;
+    // First frame that is NOT the decorator file, after we've seen it at least once
+    if (passedGoFrame) return file;
   }
   return undefined;
 }

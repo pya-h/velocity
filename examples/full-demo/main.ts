@@ -17,7 +17,7 @@
 
 import * as path from 'path';
 import { velo } from './velo';
-import { db } from './db';
+import './db';
 
 // Entities self-register on db when imported
 import './src/entities/user.entity';
@@ -25,11 +25,13 @@ import './src/entities/post.entity';
 
 // Services self-register on velo when imported
 import './src/services/user.service';
+import './src/services/job.service';
 
 // Controllers self-register on velo when imported
 import './src/controllers/health.controller';
 import './src/controllers/user.controller';
 import './src/controllers/post.controller';
+import './src/controllers/job.controller';
 
 async function main() {
   velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));

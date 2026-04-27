@@ -669,7 +669,8 @@ export class VelocityApplication {
   // ─── Background goroutines (@Go) ───
 
   private startGoMethods(): void {
-    const goRunnerPath = fsPath.join(__dirname, '..', 'workers', 'go-runner.ts');
+    const ext = __filename.endsWith('.ts') ? '.ts' : '.js';
+    const goRunnerPath = fsPath.join(__dirname, '..', 'workers', `go-runner${ext}`);
 
     for (const serviceClass of this.goServiceClasses) {
       const defs: GoMethodDef[] = Reflect.getMetadata(GO_METADATA_KEY, serviceClass) ?? [];

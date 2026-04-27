@@ -11,6 +11,7 @@ export { Middleware, UseMiddleware } from './decorators/middleware';
 export { Interceptor, UseInterceptor } from './decorators/interceptor';
 export { Service } from './decorators/service';
 export { Go } from './decorators/go';
+export { VelocityChannel } from './channel/channel';
 
 // ORM exports
 export { Entity, Column, PrimaryKey } from './orm/decorators';
