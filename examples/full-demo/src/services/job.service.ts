@@ -1,4 +1,4 @@
-import { Service, Go, VelocityChannel } from '@velocity/framework';
+import { Service, Go, Channel, VelocityChannel } from '@velocity/framework';
 import { velo } from '../../velo';
 
 export interface Job {
@@ -35,10 +35,10 @@ export function enqueueJob(payload: any): Job {
 @Service()
 class JobWorkerService {
   @Go()
-  async run() {
-    const jobs = new VelocityChannel<Job>('velocity:jobs');
-    const out  = new VelocityChannel<JobResult>('velocity:results');
-
+  async run(
+    @Channel('velocity:jobs') jobs: VelocityChannel<Job>,
+    @Channel('velocity:results') out: VelocityChannel<JobResult>,
+  ) {
     for await (const job of jobs) {
       await Bun.sleep(150);
       out.send({

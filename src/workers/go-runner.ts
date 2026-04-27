@@ -1,4 +1,5 @@
 import { _goClassRegistry } from '../decorators/go';
+import { resolveChannelArgs } from '../decorators/channel';
 
 // globalThis cast avoids missing-lib TS error for DedicatedWorkerGlobalScope
 const workerSelf = globalThis as any;
@@ -20,7 +21,8 @@ workerSelf.onmessage = async (event: MessageEvent) => {
     }
 
     const instance = new ServiceClass();
-    await instance[method](data);
+    const args = resolveChannelArgs(instance, method, data);
+    await instance[method](...args);
 
     workerSelf.postMessage({ type: 'done' });
   } catch (err: any) {
