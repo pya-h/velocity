@@ -48,6 +48,7 @@ export class VelocityApplication {
   private dirMounts: { prefix: string; dir: string }[] = [];
   private goServiceClasses: any[] = [];
   private activeRequests = 0;
+  private ready = false;
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -373,6 +374,7 @@ export class VelocityApplication {
 
     this.initializeRegistrations();
     this.buildTrie();
+    this.ready = true;
     await this.initializeDatabases();
 
     this.logger.info('Application initialized successfully');
@@ -450,6 +452,18 @@ export class VelocityApplication {
     };
     process.once('SIGTERM', handler);
     process.once('SIGINT', handler);
+  }
+
+  /**
+   * Initializes registrations and builds the route trie without starting a server.
+   * Idempotent — safe to call multiple times. Intended for use in tests via TestUtils.makeRequest().
+   */
+  public async prepareForTesting(): Promise<this> {
+    if (this.ready) return this;
+    this.initializeRegistrations();
+    this.buildTrie();
+    this.ready = true;
+    return this;
   }
 
   public getContainer(): Container {

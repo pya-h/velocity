@@ -1,26 +1,33 @@
 # Velocity Framework
 
-A minimal, fast, type-safe TypeScript framework for Node.js with decorators, built-in ORM, and zero bloat.
+A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators, built-in ORM, and zero bloat.
 
 ## Features
 
-- **Decorator-based** routing (`@Get`, `@Post`, `@Put`, `@Delete`, `@Patch`)
-- **Self-registration** — controllers, services, entities register themselves
-- **Variadic register** — `velo.register(A, B, C, options?)` with scoping
-- **Scoped DI** — services can be scoped to specific controllers
+- **Decorator-based routing** — `@Get`, `@Post`, `@Put`, `@Delete`, `@Patch`
+- **Self-registration** — controllers, services, entities register themselves; `main.ts` stays clean
+- **Variadic register** — `velo.register(A, B, C, options?)` with scoping and middleware
+- **Scoped DI** — services can be scoped to specific controllers via child containers
 - **Controller nesting** — mount controllers under other controllers as sub-routes
-- **Global prefix** — prefix all endpoints (e.g. `/api`) with exclusions
-- **Built-in ORM** — Prisma-like `db.User.findAll()` with SQLite, PostgreSQL, MySQL
+- **Global prefix** — prefix all endpoints (e.g. `/api`) with per-path exclusions
+- **Segment-trie router** — O(k) lookup regardless of route count; literal routes always beat param routes
+- **Built-in ORM** — Prisma-like `db.User.findAll()` with SQLite, PostgreSQL, MySQL; connection pooling
 - **Static file serving** — `velo.serve()` and `velo.static()` for files and directories
-- **Type generation** — `velogen` generates types for DB instances, no `any` casts
-- **Envelocity** — typed, read-only `.env` wrapper with `OrThrow` getters
-- **API Tester** — auto-generated testing UI from controller metadata
-- **Dependency injection** — constructor-based DI with singleton support and child containers
+- **Graceful shutdown** — in-flight request draining; auto SIGTERM/SIGINT via `shutdown: { auto: true }`
+- **`@Go` background workers** — real Bun Worker threads launched at startup; `@Channel` injection for typed cross-thread messaging
+- **`@Fn` HTTP functions** — call any controller method at `GET /.name(arg1,arg2,...)`; no req/res boilerplate
+- **Type generation** — `velogen` generates types for DB instances; `envgen` generates types for `.env`
+- **Envelocity** — typed, read-only `.env` wrapper with `OrThrow` getters and nested key grouping
+- **API Tester** — auto-generated interactive testing UI from controller metadata
+- **Dependency injection** — constructor-based DI with singleton/transient support and child containers
 - **Validation** — Joi schemas with `@Validate` decorator
 - **Middleware & interceptors** — function or class-based, per-route or per-registration
-- **CORS** — built-in CORS with config-based origin, methods, credentials
-- **Logging** — structured Winston-based logging
-- **Zero bloat** — uses Node's `http` module directly, no express
+- **CORS** — built-in config-based CORS with origin whitelist, credentials, OPTIONS handling
+- **Rate limiting** — built-in in-memory rate limiter with custom key generators
+- **Security headers** — built-in Helmet-style security headers
+- **Logging** — custom zero-dep structured logger (JSON/simple/combined, console/file)
+- **Test framework** — `@Suite/@Test/@BeforeEach/@AfterEach/@BeforeAll/@AfterAll/@Mock` decorators built on `bun:test`
+- **Zero bloat** — no express, no reflect-metadata, no Winston; uses Node's `http` module directly
 
 ## Scripts & Tools
 
@@ -30,6 +37,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js with decorators, bui
 | `npm run sync` | Symlink `dist/` into `node_modules/@velocity/framework` |
 | `npm run dev` | Build + sync in one step |
 | `npm run demo` | Run the full-demo example |
+| `bun test` | Run test suite (112 tests, ~200 ms) |
 | `npm run velogen -- <dir>` | Generate typed DB interfaces from entity files |
 | `npm run envgen -- <dir>` | Generate typed env config from `.env` file |
 | `npm run apitester -- <dir>` | Generate interactive API testing UI from controllers |
@@ -44,6 +52,9 @@ npm run dev                            # Build + symlink
 npm run velogen -- examples/full-demo  # DB types
 npm run envgen -- examples/full-demo   # Env config types
 npm run apitester -- examples/full-demo # API tester UI
+
+# Tests
+bun test
 
 # Run the demo
 npm run demo                           # → http://localhost:5000
@@ -63,6 +74,7 @@ export const velo = new VelocityApplication({
   port: 5000,
   globalPrefix: '/api',
   cors: { origin: '*', credentials: false },
+  shutdown: { timeout: 10_000, auto: true }, // graceful SIGTERM/SIGINT
 });
 ```
 
@@ -190,16 +202,6 @@ Features:
 - Light/dark theme (persistent)
 - Keyboard shortcut: `Ctrl+Enter` to send
 
-## Static File Serving
-
-```typescript
-// Serve a single file at a URL
-velo.serve('/docs', path.join(__dirname, 'public/docs.html'));
-
-// Serve a directory under a prefix
-velo.static('/assets/', path.join(__dirname, 'public/assets'));
-```
-
 ## Registration API
 
 ### Variadic registration
@@ -229,9 +231,64 @@ interface RegisterOptions {
   scope?: any[];              // Controllers to scope to
   singleton?: boolean;        // Singleton (default) or transient
   prefix?: string;            // Override controller path
-  middleware?: MiddlewareFunction[];  // Additional middleware
+  middleware?: MiddlewareFunction[];  // Additional middleware applied to all routes
 }
 ```
+
+## Graceful Shutdown
+
+```typescript
+const velo = new VelocityApplication({
+  port: 5000,
+  shutdown: { timeout: 10_000, auto: true },
+});
+await velo.listen();
+// SIGTERM/SIGINT registered automatically
+// or: process.on('SIGTERM', () => velo.close())
+```
+
+`close()` sequence: stop accepting → drain in-flight requests → close DB connections → log "Server closed".
+
+## Background Workers (`@Go` + `@Channel`)
+
+```typescript
+@Service()
+class JobWorkerService {
+  @Go()
+  async run(
+    @Channel('velocity:jobs')    jobs: VelocityChannel<Job>,
+    @Channel('velocity:results') out:  VelocityChannel<JobResult>,
+  ) {
+    for await (const job of jobs) {
+      out.send({ jobId: job.id, output: 'processed' });
+    }
+  }
+}
+velo.register(JobWorkerService);
+```
+
+`@Go` spawns a real Bun Worker thread when the server starts. `@Channel` injects `VelocityChannel<T>` (backed by `BroadcastChannel`) for typed cross-thread messaging. Falls back to event-loop concurrency on Node.js.
+
+## HTTP Function Calls (`@Fn`)
+
+```typescript
+@Controller('/users')
+class UserController {
+  // GET /.findUser(1)
+  @Fn()
+  async findUser(id: number) {
+    return db.User.findById(id);
+  }
+
+  // GET /.greet("Alice",true)
+  @Fn()
+  async greet(name: string, formal: boolean) {
+    return { message: formal ? `Good day, ${name}.` : `Hey ${name}!` };
+  }
+}
+```
+
+All HTTP methods reach `/.` routes. Return value is JSON; `undefined` → 204. No `eval` — safe state-machine arg parser handles numbers, booleans, `null`, quoted strings, unquoted strings.
 
 ## ORM — Entity Accessor API
 
@@ -246,35 +303,121 @@ await db.User.count({ age: 25 });
 await db.User.query().select('name').where('age > ?', 18).orderBy('name').execute();
 ```
 
+## Static File Serving
+
+```typescript
+velo.serve('/docs', path.join(__dirname, 'public/docs.html'));
+velo.static('/assets/', path.join(__dirname, 'public/assets'));
+```
+
+## Testing
+
+### Decorator-based tests (`@Suite` / `@Test`)
+
+```typescript
+import { Suite, Test, BeforeEach, AfterEach, Mock, expect, mock } from '@velocity/framework';
+import { TestUtils } from '@velocity/framework';
+
+@Suite('User service')
+class UserServiceTests {
+  private app!: VelocityApplication;
+
+  // Factory re-called before each @Test — fresh mock, no accumulated call history
+  @Mock(() => mock(() => [{ id: 1, name: 'Alice' }]))
+  private queryFn: any;
+
+  @BeforeEach
+  async setup() {
+    this.app = TestUtils.createTestApp();
+    this.app.register(UserController);
+  }
+
+  @Test('returns all users')
+  async allUsers() {
+    const { status, body } = await TestUtils.makeRequest(this.app, {
+      method: 'GET',
+      path: '/users',
+    });
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+  }
+}
+```
+
+### TestUtils helpers
+
+```typescript
+// Create a silent test app (logging suppressed)
+const app = TestUtils.createTestApp({ cors: { origin: '*', credentials: false } });
+app.register(MyController);
+
+// Drive handleRequest() directly — no network
+const { status, headers, body } = await TestUtils.makeRequest(app, {
+  method:  'POST',
+  path:    '/items',
+  body:    { name: 'sword' },
+  headers: { authorization: 'Bearer token' },
+});
+```
+
+`makeRequest` calls `prepareForTesting()` automatically (initializes routes without starting a server).
+
+### Traditional `describe/test` style
+
+Test files can also use `bun:test` directly — both styles work:
+
+```typescript
+import { describe, test, expect } from 'bun:test';
+import { TestUtils } from '@velocity/framework';
+```
+
+> **Note:** Decorated controller methods in test fixtures must use `any` for request parameters (not `VelocityRequest`). TypeScript interfaces are erased at runtime, but `emitDecoratorMetadata` tries to capture them as values — causing a Bun error.
+
 ## Supported Databases
 
 | Database | Driver | Config `type` |
 |---|---|---|
-| SQLite | `better-sqlite3` | `'sqlite'` |
-| PostgreSQL | `pg` | `'postgresql'` |
-| MySQL | `mysql2` | `'mysql'` |
+| SQLite | `bun:sqlite` (Bun) / `better-sqlite3` (Node) | `'sqlite'` |
+| PostgreSQL | `pg` (Pool) | `'postgresql'` |
+| MySQL | `mysql2` (Pool) | `'mysql'` |
+
+Optional pool config:
+
+```typescript
+export const db = DB({ type: 'postgresql', database: 'mydb', pool: { min: 5, max: 20 } });
+```
 
 ## Project Structure
 
 ```
 src/
-  core/application.ts    — HTTP server, registration, static serving, request pipeline
-  core/container.ts      — DI container (parent/child, singleton, cycle detection)
-  config/envelocity.ts   — Envelocity runtime (env tree builder, Proxy, OrThrow)
-  decorators/            — @Controller, @Get/@Post, @Service, @UseMiddleware, @UseInterceptor
-  orm/                   — Database, EntityAccessor, QueryBuilder, Connection, decorators
-  middleware/            — CORS, rate limiting, security headers
-  validation/            — Joi-based validation + @Validate
-  logging/               — Winston-based structured logging
+  core/application.ts      — HTTP server, registration, trie router, request pipeline
+  core/container.ts        — DI container (parent/child, singleton, cycle detection)
+  core/metadata.ts         — Internal Reflect polyfill (replaces reflect-metadata)
+  config/envelocity.ts     — Envelocity runtime (env tree, Proxy, OrThrow)
+  decorators/              — @Controller, @Get/@Post, @Service, @UseMiddleware, @UseInterceptor
+                             @Go, @Channel, @Fn
+  channel/                 — VelocityChannel<T> (BroadcastChannel wrapper)
+  workers/                 — go-runner.ts (Bun Worker entry point for @Go)
+  orm/                     — Database, EntityAccessor, QueryBuilder, Connection, decorators
+  middleware/              — CORS, rate limiting, security headers
+  interceptors/            — TransformInterceptor
+  validation/              — Joi-based validation + @Validate
+  logging/                 — Custom zero-dep structured logger
+  testing/                 — TestUtils, @Suite/@Test decorator framework
 scripts/
-  sync.js                — Symlinks dist/ to node_modules/@velocity/framework
-  velogen.js             — DB type generator
-  envgen.js              — Envelocity config generator
-  apitester.js           — API tester UI generator
+  sync.js                  — Symlinks dist/ to node_modules/@velocity/framework
+  velogen.js               — DB type generator
+  envgen.js                — Envelocity config generator
+  apitester.js             — API tester UI generator
+tests/
+  fn.test.ts, container.test.ts, router.test.ts,
+  middleware.test.ts, validator.test.ts,
+  query-builder.test.ts, e2e.test.ts
 examples/
-  full-demo/             — Complete example with all features
+  full-demo/               — Complete example with all features
     velo.ts, db.ts, main.ts
     src/controllers/, src/entities/, src/services/
-    velo/                — Generated files (types, envelocity, apitester)
-    public/              — Static HTML
+    velo/                  — Generated files (types, envelocity, apitester)
+    public/                — Static HTML
 ```

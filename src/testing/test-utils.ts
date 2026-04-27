@@ -2,20 +2,22 @@ import { VelocityApplication } from '../core/application';
 import { Container } from '../core/container';
 
 export class TestUtils {
+  /** Creates a VelocityApplication with logging suppressed — suitable for tests. */
   public static createTestApp(config?: any): VelocityApplication {
-    const testConfig = {
+    return new VelocityApplication({
       port: 0,
-      logger: {
-        level: 'error' as const,
-        format: 'simple' as const,
-        outputs: [] as const
-      },
-      ...config
-    };
-
-    return new VelocityApplication(testConfig);
+      logger: { level: 'error' as const, format: 'simple' as const, outputs: [] as const },
+      ...config,
+    });
   }
 
+  /**
+   * Creates a mock request object compatible with VelocityApplication's handleRequest().
+   *
+   * For POST/PUT/PATCH with a `body`, a fake `__bunNativeRequest` is attached so that
+   * parseBody() takes the Bun code-path and returns the body synchronously — no stream
+   * emulation required.
+   */
   public static createMockRequest(options: {
     method?: string;
     url?: string;
@@ -24,45 +26,74 @@ export class TestUtils {
     params?: Record<string, string>;
     query?: Record<string, string>;
   } = {}): any {
-    return {
+    const req: any = {
       method: options.method || 'GET',
       url: options.url || '/',
-      body: options.body,
       headers: options.headers || {},
       params: options.params || {},
-      query: options.query || {}
+      query: options.query || {},
+      on: (_ev: string, _fn: any) => req,
     };
+
+    if (options.body !== undefined) {
+      req.body = options.body; // pre-set for direct method calls (bypassing handleRequest)
+    }
+
+    // Always provide __bunNativeRequest so handleRequest's parseBody() uses the Bun
+    // code-path (synchronous text/json, no stream events). Without this, POST/PUT/PATCH
+    // requests would hang waiting for stream 'end' events that the mock never fires.
+    const isJson = options.body !== undefined && typeof options.body !== 'string';
+    const bodyStr = options.body !== undefined
+      ? (isJson ? JSON.stringify(options.body) : String(options.body))
+      : '';
+    req.__bunNativeRequest = {
+      headers: {
+        get: (name: string) => {
+          if (name === 'content-length') return String(bodyStr.length);
+          if (name === 'content-type') return isJson ? 'application/json' : 'text/plain';
+          return null;
+        },
+      },
+      json:  async () => (isJson ? options.body : (bodyStr ? JSON.parse(bodyStr) : {})),
+      text:  async () => bodyStr,
+    };
+
+    return req;
   }
 
+  /** Creates a mock response object compatible with VelocityApplication's enhanceResponse(). */
   public static createMockResponse(): any {
-    const response = {
+    const res: any = {
       statusCode: 200,
       headers: {} as Record<string, string>,
       body: '',
       headersSent: false,
 
-      setHeader: function(name: string, value: string) {
-        this.headers[name] = value;
+      setHeader(name: string, value: string | number | readonly string[]) {
+        this.headers[name.toLowerCase()] = Array.isArray(value)
+          ? (value as string[]).join(', ')
+          : String(value);
       },
+      getHeader(name: string) { return this.headers[name.toLowerCase()]; },
+      removeHeader(name: string) { delete this.headers[name.toLowerCase()]; },
 
-      removeHeader: function(name: string) {
-        delete this.headers[name];
-      },
-
-      status: function(code: number) {
+      writeHead(code: number, hdrs?: Record<string, string>) {
         this.statusCode = code;
-        return this;
+        if (hdrs) for (const [k, v] of Object.entries(hdrs)) this.headers[k.toLowerCase()] = v;
+        this.headersSent = true;
       },
 
-      json: function(data: any) {
-        this.setHeader('Content-Type', 'application/json');
+      status(code: number) { this.statusCode = code; return this; },
+
+      json(data: any) {
+        this.setHeader('content-type', 'application/json');
         this.body = JSON.stringify(data);
         this.headersSent = true;
       },
 
-      send: function(data: any) {
+      send(data: any) {
         if (typeof data === 'string') {
-          this.setHeader('Content-Type', 'text/plain');
+          this.setHeader('content-type', 'text/plain');
           this.body = data;
         } else {
           this.json(data);
@@ -70,52 +101,61 @@ export class TestUtils {
         this.headersSent = true;
       },
 
-      end: function(data?: any) {
-        if (data) this.body = data;
+      end(data?: any) {
+        if (data !== undefined && data !== '') this.body = data;
         this.headersSent = true;
-      }
+      },
+
+      // No-op EventEmitter stubs (used by graceful-shutdown tracking)
+      on()             { return res; },
+      once()           { return res; },
+      emit()           { return false; },
+      removeListener() { return res; },
     };
 
-    return response;
+    return res;
   }
 
-  public static async makeRequest(app: VelocityApplication, options: {
-    method: string;
-    path: string;
-    body?: any;
-    headers?: Record<string, string>;
-  }): Promise<any> {
+  /**
+   * Sends a request directly through the application's request pipeline (no network).
+   * Calls `prepareForTesting()` automatically — safe to call before or after `register()`.
+   *
+   * @returns `{ status, headers, body }` — body is parsed as JSON when possible.
+   */
+  public static async makeRequest(
+    app: VelocityApplication,
+    options: {
+      method: string;
+      path: string;
+      body?: any;
+      headers?: Record<string, string>;
+    },
+  ): Promise<{ status: number; headers: Record<string, string>; body: any }> {
+    await (app as any).prepareForTesting();
+
     const req = this.createMockRequest({
       method: options.method,
-      url: options.path,
-      body: options.body,
-      headers: options.headers
+      url:    options.path,
+      body:   options.body,
+      headers: options.headers,
     });
-
     const res = this.createMockResponse();
 
-    // Simulate request handling
     await (app as any).handleRequest(req, res);
 
-    return {
-      status: res.statusCode,
-      headers: res.headers,
-      body: res.body ? JSON.parse(res.body) : null
-    };
+    let body: any = res.body || null;
+    if (body && typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { /* keep as string */ }
+    }
+
+    return { status: res.statusCode, headers: res.headers, body };
   }
 
   public static createMockContainer(): Container {
     const container = new Container();
-    
-    // Register common test dependencies
     container.register('logger', {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      log: () => {}
+      debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, log: () => {},
     });
-
     return container;
   }
 
@@ -123,12 +163,10 @@ export class TestUtils {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  public static generateRandomString(length: number = 10): string {
+  public static generateRandomString(length = 10): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
-    for (let i = 0; i < length; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < length; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
     return result;
   }
 

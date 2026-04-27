@@ -173,12 +173,40 @@ calls go through the same storage as custom framework metadata keys.
 
 ---
 
-### T-10: `bun test` suite
+### T-10: `bun test` suite — DONE
 **Area:** Correctness / enables safe refactoring
-No automated tests exist. This makes T-04, T-05, T-09 risky to land.
-Write unit tests for: router matching, middleware chain, interceptors, ORM query builder,
-`Validator`, `Envelocity`. Write integration tests for: full request lifecycle, CORS, rate
-limiting, error handling.
+
+112 tests across 7 files, 0 failures. `bun test` runs in ~200 ms.
+
+**Test decorator framework** (`src/testing/decorators.ts`):
+- `@Suite(name)` — class decorator; registers a `describe()` block with all `@Test` methods
+- `@Test(name?)` — marks a method as a test case (name defaults to method name)
+- `@Mock(factory)` — property decorator; factory re-called before each test (fresh mock, no accumulated history)
+- `@BeforeEach` / `@AfterEach` — run before/after each `@Test` in the suite
+- `@BeforeAll` / `@AfterAll` — run once before/after all tests in the suite
+- Re-exports `expect` and `mock` from `bun:test` so test files only need one import
+
+**TestUtils improvements** (`src/testing/test-utils.ts`):
+- `createMockRequest` always sets `__bunNativeRequest` (prevents `parseBody` hanging on stream events for POST/PUT/PATCH without bodies)
+- `createMockRequest` pre-sets `req.body` for direct controller method calls (bypasses `handleRequest`)
+- `createMockResponse` includes no-op `on/once/emit/removeListener` stubs (required for graceful-shutdown request tracking)
+- `makeRequest` catches JSON parse errors and returns raw string body as fallback
+
+**`VelocityApplication.prepareForTesting()`** (new public method):
+Initializes registrations and builds the route trie without starting a server. Idempotent (`ready` flag). Called automatically by `TestUtils.makeRequest()`.
+
+**Test files** (`tests/`):
+| File | Style | What it covers |
+|---|---|---|
+| `fn.test.ts` | plain `describe/test` | `parseFunctionCall`, `parseFnArgs` — 20 cases |
+| `container.test.ts` | `@Suite` | Singleton, transient, factory, constructor injection, circular deps, child containers |
+| `router.test.ts` | plain `describe/test` | Literal routes, param extraction, literal>param priority, multi-param, method separation, global prefix + exclusions |
+| `middleware.test.ts` | `@Suite` + plain | Middleware order, blocking, multi-level; CORS headers/preflight/credentials; rate-limit enforcement/headers/key generator |
+| `validator.test.ts` | `@Suite` | Valid/invalid schemas, multi-error messages, preset types, `@Validate` decorator pass/fail |
+| `query-builder.test.ts` | plain `describe/test` | SELECT/WHERE/JOIN/ORDER/LIMIT/OFFSET, INSERT/RETURNING, UPDATE, DELETE, identifier safety |
+| `e2e.test.ts` | `@Suite` + plain | Full pipeline: GET/POST/PUT/DELETE, auth middleware, 204 on undefined return, 500 on throw, interceptors, `@Fn` dispatch, config-based CORS, preflight, idempotent `prepareForTesting()` |
+
+**Usage note:** controller method parameters in test fixtures must use `any` (not `VelocityRequest`) because `emitDecoratorMetadata` captures parameter types as runtime values and TypeScript interfaces don't exist at runtime.
 
 ---
 

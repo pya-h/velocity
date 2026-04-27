@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router, graceful shutdown)
+> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router, graceful shutdown, reflect-metadata removed, test framework)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|---|
 | Runtime | Node.js / **Bun** | Node.js | Node.js | Any (Node/Bun/Edge) | Bun only | Node.js |
 | Source size | 2K lines | ~90K lines | ~15K lines | ~20K lines | ~12K lines | ~3K lines |
-| Prod deps | 4 | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
+| Prod deps | **3** (joi + pg + mysql2) | 6 (core) + ~90 transitive | 15 + 41 transitive | **0** | 4 + 16 transitive | 28 + 65 transitive |
 | TypeScript | Native, decorators | Native, decorators | Native, no decorators | Native, no decorators | Native, no decorators | @types bolt-on |
 | DI Container | Built-in (hierarchical) | Built-in (module-scoped) | No | No | No (derive/decorate) | No |
 | Built-in ORM | Yes (Prisma-like) | No (recommends TypeORM/Prisma) | No | No | No | No |
@@ -66,7 +66,7 @@ Database drivers (pg, mysql2, bun:sqlite) are **lazily loaded** via dynamic `imp
 - `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache. Since `connect()` is called once at startup, there is no per-request overhead.
 
 **Framework overhead (within each engine):**
-- Velocity on Bun adds ~29–33 MB over the raw `Bun.serve()` baseline — joi + reflect-metadata + framework code.
+- Velocity on Bun adds ~26–30 MB over the raw `Bun.serve()` baseline — joi + framework code. `reflect-metadata` removed (T-09); Winston removed (T-02) — both were the main contributors to the previous ~29–33 MB figure.
 - Fastify on Node adds ~20–25 MB over the raw `http.createServer` baseline.
 - NestJS on Node adds ~64–69 MB over the raw baseline — DI system, reflect-metadata, module graph.
 
@@ -92,11 +92,12 @@ The throughput advantage of Bun is in req/sec (15,522 vs ~5,070 req/sec), not in
 
 ## Where Velocity Wins
 
-- **Minimal footprint**: 24 source files, 2K lines. Entire framework is readable in an afternoon.
+- **Minimal footprint**: ~28 source files, ~2.5K lines. Entire framework is readable in an afternoon.
 - **Batteries-included ORM**: No need to install, configure, and wire up Prisma/TypeORM separately.
 - **DI without module boilerplate**: NestJS requires `@Module({ imports, controllers, providers })` for every feature. Velocity: just `velo.register(X)`.
 - **Type-safe env config**: Envelocity generates types from `.env` — zero runtime cost for type safety, OrThrow without function calls.
 - **Built-in API tester**: `npm run apitester` generates an interactive testing UI from decorators — no Postman, no Swagger setup, no external tools. No other framework does this.
+- **Built-in test decorator framework**: `@Suite/@Test/@BeforeEach/@AfterEach/@BeforeAll/@AfterAll/@Mock` — class-based tests with automatic mock refresh and lifecycle hooks. Built on `bun:test`; zero external test runners or libraries needed.
 - **`@Go()` background goroutines with `@Channel` injection**: Service methods decorated with `@Go()` launch in a real **Bun Worker thread** when the server starts — true OS-level parallelism, not event-loop concurrency. `VelocityChannel<T>` (backed by `BroadcastChannel`) provides typed cross-thread message passing. Channels are injected into worker methods via `@Channel('name')` parameter decorators — no manual instantiation needed. No other framework has this.
 - **HTTP Function Calls (`@Fn`)**: Mark any controller method with `@Fn()` and it becomes callable at `GET /.functionName(arg1,arg2,...)`. Arguments are parsed directly from the URL — numbers, booleans, `null`, quoted strings — with no req/res boilerplate. Great for simple RPC-style queries and internal tooling. No equivalent in any listed framework.
 - **Static file serving**: `velo.serve()` and `velo.static()` — single files or directories, with MIME detection and path traversal protection.

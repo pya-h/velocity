@@ -37,6 +37,7 @@ export { Config } from './config/config';
 export { createEnvelocity } from './config/envelocity';
 export type { EnvelocityOptions } from './config/envelocity';
 export { TestUtils } from './testing/test-utils';
+export { Suite, Test, BeforeEach, AfterEach, BeforeAll, AfterAll, Mock } from './testing/decorators';
 
 // Type exports (RegisterOptions, ApplicationConfig, etc.)
 export * from './types';
