@@ -7,13 +7,13 @@ export { Container } from './core/container';
 // Decorator exports
 export { Controller } from './decorators/controller';
 export { Get, Post, Put, Delete, Patch } from './decorators/route';
-export { Middleware, UseMiddleware } from './decorators/middleware';
-export { Interceptor, UseInterceptor } from './decorators/interceptor';
+export { Middleware, Middlewares } from './decorators/middleware';
+export { Interceptor, Interceptors } from './decorators/interceptor';
 export { Service } from './decorators/service';
 export { Go } from './decorators/go';
 export { Channel } from './decorators/channel';
 export { Fn } from './decorators/fn';
-export { UseGuard } from './decorators/guard';
+export { Guards } from './decorators/guard';
 export { Upload } from './decorators/upload';
 export { WebSocket } from './decorators/websocket';
 export { VelocityChannel } from './channel/channel';

@@ -1,4 +1,4 @@
-import { Controller, Post as HttpPost, Upload, UseGuard } from '@velocity/framework';
+import { Controller, Post as HttpPost, Upload, Guards } from '@velocity/framework';
 import type { VelocityRequest, VelocityResponse, GuardFunction, UploadedFile } from '@velocity/framework';
 import { velo } from '../../velo';
 
@@ -7,7 +7,7 @@ const authGuard: GuardFunction = (req) => !!req.headers['authorization'];
 @Controller('/uploads')
 class UploadController {
   @HttpPost('/avatar')
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   @Upload({ maxSize: 5 * 1024 * 1024, maxFiles: 1 })
   async avatar(req: VelocityRequest, res: VelocityResponse) {
     const file = req.files?.avatar as UploadedFile | undefined;
@@ -21,7 +21,7 @@ class UploadController {
   }
 
   @HttpPost('/documents')
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   @Upload({ maxSize: 10 * 1024 * 1024, maxFiles: 5 })
   async documents(req: VelocityRequest, res: VelocityResponse) {
     if (!req.files || Object.keys(req.files).length === 0) {

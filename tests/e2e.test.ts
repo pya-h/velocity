@@ -8,8 +8,8 @@ import { describe, test, expect as bunExpect, beforeEach } from 'bun:test';
 import { VelocityApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post, Put, Delete } from '../src/decorators/route';
-import { UseMiddleware } from '../src/decorators/middleware';
-import { UseInterceptor } from '../src/decorators/interceptor';
+import { Middlewares } from '../src/decorators/middleware';
+import { Interceptors } from '../src/decorators/interceptor';
 import { Fn } from '../src/decorators/fn';
 import { TestUtils } from '../src/testing/test-utils';
 
@@ -38,7 +38,7 @@ class ItemController {
   }
 
   @Post('/')
-  @UseMiddleware(authGuard)
+  @Middlewares(authGuard)
   create(req: any) {
     return { id: 3, ...req.body };
   }
@@ -161,7 +161,7 @@ class InterceptorTests {
     @Controller('/wrapped')
     class WrappedCtrl {
       @Get('/')
-      @UseInterceptor(wrap)
+      @Interceptors(wrap)
       handle() { return [1, 2, 3]; }
     }
 
@@ -180,7 +180,7 @@ class InterceptorTests {
     @Controller('/chained')
     class ChainedCtrl {
       @Get('/')
-      @UseInterceptor(double, addOne)
+      @Interceptors(double, addOne)
       handle() { return 5; }
     }
 

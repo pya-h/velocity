@@ -352,21 +352,21 @@ velo.registerWebSocket(ChatGateway);
 **Area:** DX / documentation
 Static analysis code generator (`scripts/velogen-openapi.js`) scans `@Controller` + route
 decorators, emits OpenAPI 3.1 `openapi.json`. Detects `@Validate` (400 responses),
-`@UseGuard` (403 + bearerAuth security scheme), `@Upload` (multipart request body),
+`@Guards` (403 + bearerAuth security scheme), `@Upload` (multipart request body),
 path parameters. Accessible via `velogen oa <dir>` or `velogen openapi <dir>`.
 
 ---
 
 ### T-SE-03: Guards — DONE
 **Area:** Auth / access control
-`@UseGuard(fn)` decorator — guard functions return `boolean`; `false` → 403 Forbidden.
+`@Guards(fn)` decorator — guard functions return `boolean`; `false` → 403 Forbidden.
 Guards run **before** middleware in the compiled handler. Follows the same pending-merge
-pattern as `@UseMiddleware` (works regardless of decorator order).
+pattern as `@Middlewares` (works regardless of decorator order).
 ```typescript
 const authGuard = (req: VelocityRequest) => !!req.headers['authorization'];
 
 @Get('/protected')
-@UseGuard(authGuard)
+@Guards(authGuard)
 async protected(req: any, res: any) { ... }
 ```
 **Implementation:** `src/decorators/guard.ts`, merged via `route.ts` pending guards,

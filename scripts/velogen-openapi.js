@@ -49,7 +49,7 @@ const methodRegex = new RegExp(
 );
 const controllerRegex = /@Controller\s*\(\s*['"`]([^'"`]*)['"`]\s*\)/;
 const validateRegex = /@Validate\s*\(/;
-const useGuardRegex = /@UseGuard\s*\(/;
+const useGuardRegex = /@Guards\s*\(/;
 const uploadRegex = /@Upload\s*\(/;
 
 function parseControllerFile(filePath) {

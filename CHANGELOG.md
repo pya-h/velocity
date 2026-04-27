@@ -7,8 +7,8 @@ All notable changes to Velocity Framework will be documented in this file.
 ### Added
 - Initial release of Velocity Framework
 - Decorator-based routing system with @Get, @Post, @Put, @Delete, @Patch
-- Comprehensive middleware system with @Middleware and @UseMiddleware
-- Request/response interceptors with @Interceptor and @UseInterceptor
+- Comprehensive middleware system with @Middleware and @Middlewares
+- Request/response interceptors with @Interceptor and @Interceptors
 - Dependency injection container with @Injectable
 - Built-in ORM with @Entity, @Column, @PrimaryKey decorators
 - Database abstraction layer supporting SQLite, PostgreSQL, and MySQL

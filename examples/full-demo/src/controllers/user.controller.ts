@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post as HttpPost, Delete,
-  UseGuard, UseInterceptor,
+  Guards, Interceptors,
   Validate, Validator,
   TransformInterceptor,
   Fn,
@@ -22,7 +22,7 @@ const createUserSchema = Validator.createSchema({
 @Controller('/users')
 class UserController {
   @Get('/')
-  @UseInterceptor(TransformInterceptor)
+  @Interceptors(TransformInterceptor)
   async list(req: VelocityRequest, res: VelocityResponse) {
     // Demo: set a cookie tracking the last visit time
     res.setCookie('last-visit', new Date().toISOString(), {
@@ -46,7 +46,7 @@ class UserController {
   }
 
   @HttpPost('/')
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   @Validate(createUserSchema)
   async create(req: VelocityRequest, res: VelocityResponse) {
     const user = await db.User.create({
@@ -57,7 +57,7 @@ class UserController {
   }
 
   @Delete('/:id')
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   async remove(req: VelocityRequest, res: VelocityResponse) {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });

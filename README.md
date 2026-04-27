@@ -16,7 +16,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **Graceful shutdown** — in-flight request draining; auto SIGTERM/SIGINT via `shutdown: { auto: true }`
 - **`@Go` background workers** — real Bun Worker threads launched at startup; `@Channel` injection for typed cross-thread messaging
 - **`@Fn` HTTP functions** — call any controller method at `GET /.name(arg1,arg2,...)`; no req/res boilerplate
-- **Guards** — `@UseGuard(fn)` decorator for boolean-return auth checks; runs before middleware
+- **Guards** — `@Guards(fn)` decorator for boolean-return auth checks; runs before middleware
 - **Lifecycle hooks** — `velo.onRequest()`, `velo.onResponse()`, `velo.onError()` global hooks
 - **Cookies** — lazy `req.cookies` parsing, `res.setCookie(name, value, options)` with full options
 - **File uploads** — `@Upload({ maxSize, maxFiles })` with Bun-native multipart; files on `req.files`
@@ -131,7 +131,7 @@ db.register(User);
 ### 4. Controller (`src/controllers/user.controller.ts`)
 
 ```typescript
-import { Controller, Get, Post as HttpPost, UseMiddleware, Validate, Validator,
+import { Controller, Get, Post as HttpPost, Middlewares, Validate, Validator,
          VelocityRequest, VelocityResponse, MiddlewareFunction } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
@@ -148,7 +148,7 @@ class UserController {
   async list() { return { users: await db.User.findAll() }; }
 
   @HttpPost('/')
-  @UseMiddleware(auth)
+  @Middlewares(auth)
   @Validate(Validator.createSchema({ name: Joi.string().required(), email: Joi.string().email().required() }))
   async create(req: VelocityRequest, res: VelocityResponse) {
     return res.status(201).json({ user: await db.User.create(req.body) });
@@ -207,7 +207,7 @@ Naming rules:
 ### `velogen oa` — OpenAPI Spec Generator
 
 Scans `@Controller` + route decorators and generates `velo/openapi.json` (OpenAPI 3.1).
-Detects `@Validate` (400 responses), `@UseGuard` (403 + bearerAuth), `@Upload` (multipart),
+Detects `@Validate` (400 responses), `@Guards` (403 + bearerAuth), `@Upload` (multipart),
 and path parameters automatically.
 
 ```bash
@@ -339,12 +339,12 @@ All HTTP methods reach `/.` routes. Return value is JSON; `undefined` → 204. N
 ## Guards
 
 ```typescript
-import { UseGuard, VelocityRequest } from '@velocity/framework';
+import { Guards, VelocityRequest } from '@velocity/framework';
 
 const authGuard = (req: VelocityRequest) => !!req.headers['authorization'];
 
 @Get('/protected')
-@UseGuard(authGuard)
+@Guards(authGuard)
 async protectedRoute(req: any, res: any) {
   return { secret: 'data' };
 }
@@ -533,8 +533,8 @@ src/
   core/container.ts        — DI container (parent/child, singleton, cycle detection)
   core/metadata.ts         — Internal Reflect polyfill (replaces reflect-metadata)
   config/envelocity.ts     — Envelocity runtime (env tree, Proxy, OrThrow)
-  decorators/              — @Controller, @Get/@Post, @Service, @UseMiddleware, @UseInterceptor
-                             @Go, @Channel, @Fn, @UseGuard, @Upload, @WebSocket
+  decorators/              — @Controller, @Get/@Post, @Service, @Middlewares, @Interceptors
+                             @Go, @Channel, @Fn, @Guards, @Upload, @WebSocket
   channel/                 — VelocityChannel<T> (BroadcastChannel wrapper)
   workers/                 — go-runner.ts (Bun Worker entry point for @Go)
   orm/                     — Database, EntityAccessor, QueryBuilder, Connection, decorators

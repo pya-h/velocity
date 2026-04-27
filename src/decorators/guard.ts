@@ -3,7 +3,7 @@ import { GuardFunction, RouteMetadata } from '../types';
 const ROUTES_METADATA_KEY = Symbol.for('routes');
 const PENDING_GUARDS_KEY = Symbol.for('pending_guards');
 
-export function UseGuard(...guards: GuardFunction[]) {
+export function Guards(...guards: GuardFunction[]) {
   return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
     const routes: RouteMetadata[] = Reflect.getMetadata(ROUTES_METADATA_KEY, target.constructor) || [];
     const route = routes.find(r => r.handler === propertyKey);

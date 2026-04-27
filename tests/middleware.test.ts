@@ -4,7 +4,7 @@ import { describe, test, expect as bunExpect } from 'bun:test';
 import { VelocityApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post } from '../src/decorators/route';
-import { UseMiddleware } from '../src/decorators/middleware';
+import { Middlewares } from '../src/decorators/middleware';
 import { TestUtils } from '../src/testing/test-utils';
 import { CorsMiddleware } from '../src/middleware/cors';
 import { RateLimitMiddleware } from '../src/middleware/rate-limit';
@@ -30,7 +30,7 @@ class MiddlewareChainTests {
     @Controller('/test')
     class TestCtrl {
       @Get('/')
-      @UseMiddleware(mid)
+      @Middlewares(mid)
       handle() { order.push('handler'); return 'ok'; }
     }
 
@@ -48,7 +48,7 @@ class MiddlewareChainTests {
     @Controller('/guarded')
     class GuardedCtrl {
       @Get('/')
-      @UseMiddleware(blocker)
+      @Middlewares(blocker)
       handle() { return 'should not reach here'; }
     }
 
@@ -67,7 +67,7 @@ class MiddlewareChainTests {
     @Controller('/ordered')
     class OrderedCtrl {
       @Get('/')
-      @UseMiddleware(mw1, mw2)
+      @Middlewares(mw1, mw2)
       handle() { return 'ok'; }
     }
 
@@ -85,7 +85,7 @@ class MiddlewareChainTests {
     @Controller('/layered')
     class LayeredCtrl {
       @Get('/')
-      @UseMiddleware(routeMw)
+      @Middlewares(routeMw)
       handle() { return 'ok'; }
     }
 

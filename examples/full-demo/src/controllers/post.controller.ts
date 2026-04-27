@@ -3,8 +3,8 @@ import {
   Get,
   Post as HttpPost,
   Delete,
-  UseGuard,
-  UseInterceptor,
+  Guards,
+  Interceptors,
   Validate,
   Validator,
 } from "@velocity/framework";
@@ -31,7 +31,7 @@ const createPostSchema = Validator.createSchema({
 @Controller("/posts")
 class PostController {
   @Get("/")
-  @UseInterceptor(timingInterceptor)
+  @Interceptors(timingInterceptor)
   async list(_req: VelocityRequest, _res: VelocityResponse) {
     const posts = await pgDb.Post.findAll();
     return { posts };
@@ -48,7 +48,7 @@ class PostController {
   }
 
   @HttpPost("/")
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   @Validate(createPostSchema)
   async create(req: VelocityRequest, res: VelocityResponse) {
     const post = await pgDb.Post.create({
@@ -59,7 +59,7 @@ class PostController {
   }
 
   @Delete("/:id")
-  @UseGuard(authGuard)
+  @Guards(authGuard)
   async remove(req: VelocityRequest, res: VelocityResponse) {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });

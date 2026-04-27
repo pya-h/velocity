@@ -22,7 +22,7 @@ function resolveInterceptorFunctions(interceptors: (InterceptorFunction | { new 
   });
 }
 
-export function UseInterceptor(...interceptors: (InterceptorFunction | { new (...args: any[]): any })[]) {
+export function Interceptors(...interceptors: (InterceptorFunction | { new (...args: any[]): any })[]) {
   return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
     const interceptorFunctions = resolveInterceptorFunctions(interceptors);
 

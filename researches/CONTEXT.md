@@ -119,8 +119,8 @@ src/
     controller.ts       — @Controller(path)
     route.ts            — @Get, @Post, @Put, @Delete, @Patch
     service.ts          — @Service(name?)
-    middleware.ts       — @Middleware, @UseMiddleware
-    interceptor.ts      — @Interceptor, @UseInterceptor
+    middleware.ts       — @Middleware, @Middlewares
+    interceptor.ts      — @Interceptor, @Interceptors
     go.ts               — @Go (background Bun Worker threads)
     channel.ts          — @Channel (inject VelocityChannel into @Go methods)
     fn.ts               — @Fn (HTTP function calls at /.name(args))

@@ -96,7 +96,7 @@ function parseController(filePath) {
     if (!rm) continue;
     let method = (aliasMap[rm[1]] || rm[1]).toUpperCase();
     const routePath = rm[2];
-    const hasAuth = /@UseMiddleware\s*\(\s*\w*[Aa]uth/.test(block);
+    const hasAuth = /@(?:Middlewares|Guards)\s*\(\s*\w*[Aa]uth/.test(block);
     const valM = block.match(/@Validate\s*\(\s*(\w+)\s*\)/);
     const fields = valM && schemas[valM[1]] ? schemas[valM[1]] : null;
     const params = (routePath.match(/:(\w+)/g) || []).map(p => p.slice(1));

@@ -17,7 +17,7 @@ function createRouteDecorator(method: string) {
         handler: propertyKey
       };
 
-      // Merge any pending middlewares stored by @UseMiddleware that ran before us
+      // Merge any pending middlewares stored by @Middlewares that ran before us
       const pendingMiddlewares: Map<string, MiddlewareFunction[]> =
         Reflect.getMetadata(PENDING_MIDDLEWARES_KEY, target.constructor) || new Map();
       if (pendingMiddlewares.has(propertyKey)) {
@@ -26,7 +26,7 @@ function createRouteDecorator(method: string) {
         Reflect.defineMetadata(PENDING_MIDDLEWARES_KEY, pendingMiddlewares, target.constructor);
       }
 
-      // Merge any pending interceptors stored by @UseInterceptor that ran before us
+      // Merge any pending interceptors stored by @Interceptors that ran before us
       const pendingInterceptors: Map<string, InterceptorFunction[]> =
         Reflect.getMetadata(PENDING_INTERCEPTORS_KEY, target.constructor) || new Map();
       if (pendingInterceptors.has(propertyKey)) {
@@ -35,7 +35,7 @@ function createRouteDecorator(method: string) {
         Reflect.defineMetadata(PENDING_INTERCEPTORS_KEY, pendingInterceptors, target.constructor);
       }
 
-      // Merge any pending guards stored by @UseGuard that ran before us
+      // Merge any pending guards stored by @Guards that ran before us
       const pendingGuards: Map<string, GuardFunction[]> =
         Reflect.getMetadata(PENDING_GUARDS_KEY, target.constructor) || new Map();
       if (pendingGuards.has(propertyKey)) {

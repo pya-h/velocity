@@ -22,7 +22,7 @@ function resolveMiddlewareFunctions(middlewares: (MiddlewareFunction | { new (..
   });
 }
 
-export function UseMiddleware(...middlewares: (MiddlewareFunction | { new (...args: any[]): any })[]) {
+export function Middlewares(...middlewares: (MiddlewareFunction | { new (...args: any[]): any })[]) {
   return function (target: any, propertyKey: string, descriptor?: PropertyDescriptor) {
     const middlewareFunctions = resolveMiddlewareFunctions(middlewares);
 
