@@ -1,5 +1,11 @@
 export const GO_METADATA_KEY = Symbol.for('velocity:go');
 
+/**
+ * Class registry populated by @Go at decoration time (runs in both main thread
+ * and worker thread). Allows go-runner to find non-exported service classes.
+ */
+export const _goClassRegistry = new Map<string, any>();
+
 export interface GoOptions {
   /** Initial data passed as the first argument to the method in the worker thread. */
   data?: any;
@@ -61,8 +67,10 @@ function detectCallerFile(): string | undefined {
 export function Go(options?: GoOptions): MethodDecorator {
   const file = detectCallerFile();
   return (target, propertyKey) => {
-    const defs: GoMethodDef[] = Reflect.getMetadata(GO_METADATA_KEY, (target as any).constructor) ?? [];
+    const ctor = (target as any).constructor;
+    _goClassRegistry.set(ctor.name, ctor);
+    const defs: GoMethodDef[] = Reflect.getMetadata(GO_METADATA_KEY, ctor) ?? [];
     defs.push({ method: String(propertyKey), data: options?.data, file });
-    Reflect.defineMetadata(GO_METADATA_KEY, defs, (target as any).constructor);
+    Reflect.defineMetadata(GO_METADATA_KEY, defs, ctor);
   };
 }

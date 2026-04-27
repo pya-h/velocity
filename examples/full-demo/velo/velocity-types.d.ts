@@ -2,11 +2,11 @@
 // Re-run: npm run velogen -- examples/full-demo
 
 import type { EntityAccessor, Database } from '@velocity/framework';
-import type { Post } from '../src/entities/post.entity';
 import type { User } from '../src/entities/user.entity';
+import type { Post } from '../src/entities/post.entity';
 
 /** Typed database interface for `db` */
 export interface TypedDb extends Database {
-  readonly Post: EntityAccessor<Post>;
   readonly User: EntityAccessor<User>;
+  readonly Post: EntityAccessor<Post>;
 }
