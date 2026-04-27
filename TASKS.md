@@ -210,6 +210,106 @@ Initializes registrations and builds the route trie without starting a server. I
 
 ---
 
+### T-11: Eliminate double URL parse on Bun path — DONE
+**Area:** Throughput (hot path)
+`bunFetchHandler()` was parsing `new URL(request.url)`, then `handleRequest()` parsed it again.
+**Fix:** `createBunReqRes` now attaches `__parsedUrl` to the fake request object. `handleRequest`
+reuses it via `(req as any).__parsedUrl || new URL(...)` — Node path unchanged (no `__parsedUrl`,
+falls back to `new URL()`). One URL parse eliminated per Bun request.
+**Expected impact:** ~5-10% overhead reduction on Bun.
+
+---
+
+### T-12: Pre-compute static CORS headers at startup — DONE
+**Area:** Throughput (hot path)
+CORS headers were re-read from config and re-computed on every request.
+**Fix:** `buildCorsPrecomputed()` runs once at `listen()` / `prepareForTesting()`. Pre-builds:
+- `fixedHeaders: [string, string][]` — iterated in `handleRequest` (no config lookup per request)
+- `fixedHeadersObj: Record<string, string>` — `Object.assign`ed in `tryServeStaticBun`
+- `originSet: Set<string>` — O(1) origin matching instead of `Array.includes()`
+Eliminated per-request: `config.get('cors')`, `Array.isArray()`, `credentials` check, 3-4 constant
+`setHeader` calls replaced by pre-built tuple iteration.
+**Expected impact:** ~1-2% per request; larger on CORS-heavy apps.
+
+---
+
+### T-13: Shared response methods instead of per-request closures — DONE
+**Area:** GC pressure / throughput
+`enhanceResponse()` created 3 new closures per request. Now `_resJson`, `_resStatus`, `_resSend`
+are module-level `function` declarations (allocated once, use `this` binding). Node path: assigned
+by reference in `enhanceResponse`. Bun path: added directly to the `rawRes` object literal —
+`enhanceResponse` call eliminated entirely on Bun.
+**Result:** Zero per-request function allocations; consistent object shape for V8/JSC optimization.
+
+---
+
+### T-14: Avoid array allocation in body-parse method check — DONE
+**Area:** Throughput (micro)
+`['POST', 'PUT', 'PATCH'].includes(method)` replaced with direct comparison:
+`if (method === 'POST' || method === 'PUT' || method === 'PATCH')`.
+Zero allocation, branch-predicted by the CPU.
+
+---
+
+### T-15: Lazy query parameter parsing — DONE
+**Area:** Throughput / GC
+`velocityReq.query = Object.fromEntries(url.searchParams)` ran on every request even when unused.
+**Fix:** `Object.defineProperty` lazy getter — parses on first access, then replaces itself with
+the computed value (self-memoizing). Routes that never touch `req.query` skip the allocation.
+**Result:** Zero-cost for param-only routes; identical behavior for routes that read `req.query`.
+
+---
+
+### T-16: Per-route compiled handler functions (Elysia-style JIT)
+**Area:** Throughput (hot path branching)
+**Problem:** `handleRequest()` has a chain of runtime `if` checks on every request: CORS? static
+file? body parse? `.` function dispatch? middleware array? interceptors array? Each check adds
+branch prediction misses and prevents V8 from inlining the fast path.
+**Fix:** At `buildTrie()` time, for each registered route, generate a specialized handler function
+that **only includes the logic that route actually needs**:
+- Route has no middleware → skip the middleware loop entirely
+- Route has no interceptors → skip the interceptor loop
+- Route is GET → skip body parsing
+- Route has no `@Fn` → skip `pathname.startsWith('/.')` check
+This is the core technique behind Elysia's performance: each route gets a minimal, straight-line
+handler compiled once at startup. The trie leaf stores the compiled function instead of raw
+metadata.
+**Expected impact:** Significant — eliminates 4-6 conditional branches per request. The combined
+effect of T-11 through T-16 could bring Bun overhead from ~13% down toward ~5-8%.
+
+---
+
+### T-17: Avoid param object copy in `walkTrie` for the common case — DONE
+**Area:** Throughput (router hot path)
+`walkTrie()` was copying `{ ...params }` at every literal child node.
+**Fix:** Only copy when both a literal child AND a `paramChild` exist at the same depth (the only
+case where rollback is needed). When only a literal child exists, descend directly without copying.
+**Result:** For typical APIs (no ambiguous literal/param overlaps), zero object spreads during
+route resolution.
+
+---
+
+### T-18: Lazy header access in Bun adapter (avoid full copy) — DONE
+**Area:** GC / throughput
+`createBunReqRes()` eagerly copied all request headers via `request.headers.forEach(...)`.
+**Fix:** Replaced with a `Proxy` over the native `Headers` object. Headers are fetched via
+`nativeHeaders.get(key)` on first access and cached in a plain object. Supports `get`, `has`,
+`ownKeys`, and `getOwnPropertyDescriptor` traps for full compatibility.
+**Result:** Browser requests (~10-15 headers) that only access 1-3 skip ~7-12 unnecessary string
+allocations per request.
+
+---
+
+### T-19: Conditional `node:http` import on Bun — DONE
+**Area:** Memory (startup)
+`import { createServer } from 'http'` loaded the full http module on Bun where it's never used.
+**Fix:** `import type { IncomingMessage, ServerResponse } from 'http'` (compile-time only, zero
+runtime cost). `createServer` is now loaded via `require('http').createServer` only on the Node
+path — gated by `IS_BUN` in the constructor.
+**Expected impact:** ~1-3 MB RSS reduction on Bun.
+
+---
+
 ## Support Expanding
 
 ### T-SE-07: File upload support
@@ -379,3 +479,60 @@ Argument parsing is safe — no `eval`; state-machine parser with a 2000-char de
 **Implementation:** `src/decorators/fn.ts` (`@Fn`, `parseFunctionCall`, `parseFnArgs`),
 `VelocityApplication.functionRegistry` (Map populated during `registerController`),
 `VelocityApplication.dispatchFunction()` (intercepts `pathname.startsWith('/.')` in `handleRequest`).
+
+---
+
+### T-SE-08: Eden-like typed client generation (Elysia-inspired)
+**Who has it:** Elysia (Eden Treaty), tRPC.
+**Why it's popular:** Eden Treaty is one of Elysia's most cited features — developers can import
+a fully typed client on the frontend that knows every route's request and response types with
+**zero code generation** and no OpenAPI spec. It turns the backend into a type-safe SDK.
+**Approach:** Extend Velogen to generate a typed client module from controller/route decorator
+metadata. For each `@Get/@Post/...` route, emit a client method with the correct params, body,
+and return type inferred from the handler signature and `@Validate` schema:
+```typescript
+// Generated: velocity-client.ts
+export const api = {
+  users: {
+    getAll:  () => fetch('/users').then(r => r.json()) as Promise<User[]>,
+    getById: (id: string) => fetch(`/users/${id}`).then(r => r.json()) as Promise<User>,
+    create:  (body: CreateUserDto) => fetch('/users', { method: 'POST', body: JSON.stringify(body) })
+      .then(r => r.json()) as Promise<User>,
+  },
+};
+```
+Unlike Eden (which uses TypeScript type gymnastics at compile time), this would be code-generated
+like Prisma Client — simpler, no runtime overhead, works with any frontend framework.
+**Implementation:** Extend `scripts/velogen.ts` to read route metadata + Joi schemas → emit a
+typed fetch wrapper module.
+
+---
+
+### T-SE-09: Lifecycle hooks (`onRequest`, `onResponse`, `onError`)
+**Who has it:** Elysia, Fastify, Hono.
+**Why it's popular:** Global lifecycle hooks let developers add cross-cutting concerns (logging,
+metrics, tracing, error formatting) without middleware. They're lighter than middleware because
+they don't participate in the next() chain — they're event callbacks.
+**Approach:**
+```typescript
+velo.onRequest((req) => { req.startTime = performance.now(); });
+velo.onResponse((req, res) => { console.log(`${req.method} ${req.url} — ${performance.now() - req.startTime}ms`); });
+velo.onError((error, req, res) => { /* custom error formatting */ });
+```
+`onRequest` runs before routing. `onResponse` runs after the response is sent. `onError` replaces
+the default 500 handler. Stored as arrays on `VelocityApplication`; iterated in `handleRequest`.
+Cheap to implement — ~30 lines in `application.ts`.
+
+---
+
+### T-SE-10: Response compression (gzip / brotli)
+**Who has it:** All major frameworks (Express via `compression`, Fastify built-in, Elysia plugin).
+**Why it's popular:** Reduces response payload size by 60-80% for JSON/text responses. Essential
+for production APIs serving large payloads.
+**Approach:** On Bun, use the built-in `Bun.gzipSync()` / `Bun.deflateSync()` — zero deps.
+Check `Accept-Encoding` header; if `br` or `gzip` is present and response body exceeds a
+threshold (e.g. 1 KB), compress before sending. Add `Content-Encoding` and `Vary: Accept-Encoding`
+headers. Skip for already-compressed types (images, video).
+Config: `compression: { enabled: true, threshold: 1024 }` in `ApplicationConfig`.
+On Node: use `zlib.gzipSync()` / `zlib.brotliCompressSync()` (built-in, zero deps).
+**Implementation:** ~40 lines in `handleRequest()` / `bunFetchHandler()`, gated by config flag.

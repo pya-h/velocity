@@ -1,4 +1,4 @@
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import type { IncomingMessage, ServerResponse } from 'http';
 import * as fs from 'fs';
 import * as fsPath from 'path';
 
@@ -17,6 +17,24 @@ import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decor
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
 const SERVICE_METADATA_KEY = Symbol.for('service');
+
+// Shared response methods — allocated once, assigned by reference (no per-request closures)
+function _resJson(this: VelocityResponse, data: any) {
+  this.setHeader('Content-Type', 'application/json');
+  this.end(JSON.stringify(data));
+}
+function _resStatus(this: VelocityResponse, code: number) {
+  this.statusCode = code;
+  return this;
+}
+function _resSend(this: VelocityResponse, data: any) {
+  if (typeof data === 'string') {
+    this.setHeader('Content-Type', 'text/plain');
+    this.end(data);
+  } else {
+    this.json(data);
+  }
+}
 
 interface PendingRegistration {
   target: any;
@@ -49,13 +67,25 @@ export class VelocityApplication {
   private goServiceClasses: any[] = [];
   private activeRequests = 0;
   private ready = false;
+  private corsPrecomputed: {
+    isArrayOrigin: boolean;
+    /** For single-origin: the fixed origin. For array-origin: the fallback. */
+    singleOrigin: string;
+    /** For array-origin: O(1) lookup set. */
+    originSet: Set<string> | null;
+    /** [name, value] tuples for headers that never change per-request. */
+    fixedHeaders: [string, string][];
+    /** Same as fixedHeaders but as an object — used by Bun static responses. */
+    fixedHeadersObj: Record<string, string>;
+  } | null = null;
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
     this.config = new Config(config);
     this.logger = new Logger(this.config.get('logger'));
 
-    this.server = IS_BUN ? null : createServer((req, res) => this.handleRequest(req, res));
+    // Only load node:http on Node.js — Bun uses Bun.serve() and never needs it
+    this.server = IS_BUN ? null : require('http').createServer((req: IncomingMessage, res: ServerResponse) => this.handleRequest(req, res));
     this.setupContainer();
     _setCurrentApp(this);
   }
@@ -374,6 +404,7 @@ export class VelocityApplication {
 
     this.initializeRegistrations();
     this.buildTrie();
+    this.buildCorsPrecomputed();
     this.ready = true;
     await this.initializeDatabases();
 
@@ -462,6 +493,7 @@ export class VelocityApplication {
     if (this.ready) return this;
     this.initializeRegistrations();
     this.buildTrie();
+    this.buildCorsPrecomputed();
     this.ready = true;
     return this;
   }
@@ -486,35 +518,36 @@ export class VelocityApplication {
     const velocityRes = this.enhanceResponse(res);
 
     try {
-      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const url: URL = (req as any).__parsedUrl || new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       const pathname = url.pathname;
       const method = req.method?.toUpperCase() || 'GET';
 
-      const corsConfig = this.config.get('cors');
-      if (corsConfig) {
-        let allowedOrigin: string;
-        if (Array.isArray(corsConfig.origin)) {
-          // Match request origin against whitelist; fall back to first entry
-          const reqOrigin = req.headers.origin || '';
-          allowedOrigin = corsConfig.origin.includes(reqOrigin) ? reqOrigin : corsConfig.origin[0] || '';
-          res.setHeader('Vary', 'Origin');
-        } else {
-          allowedOrigin = corsConfig.origin;
+      if (this.corsPrecomputed) {
+        const cors = this.corsPrecomputed;
+        for (const [k, v] of cors.fixedHeaders) res.setHeader(k, v);
+        if (cors.isArrayOrigin) {
+          const reqOrigin = (req.headers.origin as string) || '';
+          res.setHeader('Access-Control-Allow-Origin', cors.originSet!.has(reqOrigin) ? reqOrigin : cors.singleOrigin);
         }
-        res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-        if (corsConfig.credentials) res.setHeader('Access-Control-Allow-Credentials', 'true');
         if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       }
 
       if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
 
-      if (['POST', 'PUT', 'PATCH'].includes(method)) {
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
         velocityReq.body = await this.parseBody(req);
       }
 
-      velocityReq.query = Object.fromEntries(url.searchParams);
+      // Lazy query parsing — only allocates when handler accesses req.query
+      Object.defineProperty(velocityReq, 'query', {
+        get() {
+          const val = Object.fromEntries(url.searchParams);
+          Object.defineProperty(this, 'query', { value: val, writable: true, enumerable: true, configurable: true });
+          return val;
+        },
+        enumerable: true,
+        configurable: true,
+      });
 
       if (pathname.startsWith('/.')) {
         await this.dispatchFunction(pathname, velocityReq, velocityRes);
@@ -573,26 +606,9 @@ export class VelocityApplication {
 
   private enhanceResponse(res: ServerResponse): VelocityResponse {
     const velocityRes = res as VelocityResponse;
-
-    velocityRes.json = function(data: any) {
-      this.setHeader('Content-Type', 'application/json');
-      this.end(JSON.stringify(data));
-    };
-
-    velocityRes.status = function(code: number) {
-      this.statusCode = code;
-      return this;
-    };
-
-    velocityRes.send = function(data: any) {
-      if (typeof data === 'string') {
-        this.setHeader('Content-Type', 'text/plain');
-        this.end(data);
-      } else {
-        this.json(data);
-      }
-    };
-
+    velocityRes.json = _resJson;
+    velocityRes.status = _resStatus;
+    velocityRes.send = _resSend;
     return velocityRes;
   }
 
@@ -700,14 +716,50 @@ export class VelocityApplication {
     }
   }
 
+  private buildCorsPrecomputed(): void {
+    const corsConfig = this.config.get('cors');
+    if (!corsConfig) { this.corsPrecomputed = null; return; }
+
+    const isArray = Array.isArray(corsConfig.origin);
+    const fixed: [string, string][] = [];
+    const fixedObj: Record<string, string> = {};
+
+    if (!isArray) {
+      fixed.push(['Access-Control-Allow-Origin', corsConfig.origin as string]);
+      fixedObj['Access-Control-Allow-Origin'] = corsConfig.origin as string;
+    } else {
+      fixed.push(['Vary', 'Origin']);
+      fixedObj['Vary'] = 'Origin';
+    }
+    fixed.push(['Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS']);
+    fixedObj['Access-Control-Allow-Methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
+    fixed.push(['Access-Control-Allow-Headers', 'Content-Type,Authorization']);
+    fixedObj['Access-Control-Allow-Headers'] = 'Content-Type,Authorization';
+    if (corsConfig.credentials) {
+      fixed.push(['Access-Control-Allow-Credentials', 'true']);
+      fixedObj['Access-Control-Allow-Credentials'] = 'true';
+    }
+
+    this.corsPrecomputed = {
+      isArrayOrigin: isArray,
+      singleOrigin: isArray ? ((corsConfig.origin as string[])[0] || '') : (corsConfig.origin as string),
+      originSet: isArray ? new Set(corsConfig.origin as string[]) : null,
+      fixedHeaders: fixed,
+      fixedHeadersObj: fixedObj,
+    };
+  }
+
   private walkTrie(node: TrieNode, parts: string[], index: number, params: Record<string, string>): TrieNode | null {
     if (index === parts.length) return node;
     const segment = parts[index];
 
-    // Literal match takes priority over param match.
-    // Use a copy so params set inside a failed literal subtree don't bleed into the param branch.
     const literalChild = node.children.get(segment);
     if (literalChild) {
+      if (!node.paramChild) {
+        // Only literal child — no param fallback, skip the copy
+        return this.walkTrie(literalChild, parts, index + 1, params);
+      }
+      // Both literal and param exist at this depth — copy for rollback safety
       const literalParams = { ...params };
       const result = this.walkTrie(literalChild, parts, index + 1, literalParams);
       if (result) {
@@ -814,17 +866,12 @@ export class VelocityApplication {
 
     const buildHeaders = (fp: string): Record<string, string> => {
       const h: Record<string, string> = { 'Content-Type': getMime(fp) };
-      const cors = this.config.get('cors');
-      if (cors) {
-        const origin = requestHeaders.get('origin') || '';
-        const allowed = Array.isArray(cors.origin)
-          ? (cors.origin.includes(origin) ? origin : cors.origin[0] || '')
-          : cors.origin;
-        h['Access-Control-Allow-Origin'] = allowed;
-        h['Access-Control-Allow-Methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
-        h['Access-Control-Allow-Headers'] = 'Content-Type,Authorization';
-        if (cors.credentials) h['Access-Control-Allow-Credentials'] = 'true';
-        if (Array.isArray(cors.origin)) h['Vary'] = 'Origin';
+      if (this.corsPrecomputed) {
+        Object.assign(h, this.corsPrecomputed.fixedHeadersObj);
+        if (this.corsPrecomputed.isArrayOrigin) {
+          const origin = requestHeaders.get('origin') || '';
+          h['Access-Control-Allow-Origin'] = this.corsPrecomputed.originSet!.has(origin) ? origin : this.corsPrecomputed.singleOrigin;
+        }
       }
       return h;
     };
@@ -861,8 +908,36 @@ export class VelocityApplication {
     request: Request,
     url: URL,
   ): { req: VelocityRequest; res: VelocityResponse; getResponse: () => Response } {
-    const headers: Record<string, string | string[] | undefined> = {};
-    request.headers.forEach((value, key) => { headers[key] = value; });
+    // Lazy header access — fetch from native Headers on demand instead of copying all upfront
+    const nativeHeaders = request.headers;
+    const headersCache: Record<string, string | undefined> = {};
+    const headers = new Proxy(headersCache, {
+      get(cache, key: string | symbol) {
+        if (typeof key === 'symbol') return undefined;
+        if (key in cache) return cache[key];
+        const v = nativeHeaders.get(key);
+        const result = v ?? undefined;
+        cache[key] = result;
+        return result;
+      },
+      has(_, key: string | symbol) {
+        if (typeof key === 'symbol') return false;
+        return nativeHeaders.has(key as string);
+      },
+      ownKeys() {
+        const keys: string[] = [];
+        nativeHeaders.forEach((_, k) => keys.push(k));
+        return keys;
+      },
+      getOwnPropertyDescriptor(cache, key: string | symbol) {
+        if (typeof key === 'symbol') return undefined;
+        if (!(key in cache)) {
+          const v = nativeHeaders.get(key as string);
+          cache[key as string] = v ?? undefined;
+        }
+        return { value: cache[key as string], writable: true, enumerable: true, configurable: true };
+      },
+    });
 
     const req: any = {
       url: url.pathname + (url.search || ''),
@@ -870,6 +945,7 @@ export class VelocityApplication {
       headers,
       __bunNativeRequest: request,
       __bunSkipStatic: true,
+      __parsedUrl: url,
     };
 
     let _status = 200;
@@ -906,9 +982,12 @@ export class VelocityApplication {
       once()           { return rawRes; },
       emit()           { return false; },
       removeListener() { return rawRes; },
+      json: _resJson,
+      status: _resStatus,
+      send: _resSend,
     };
 
-    const res = this.enhanceResponse(rawRes as ServerResponse) as VelocityResponse;
+    const res = rawRes as unknown as VelocityResponse;
     const getResponse = (): Response =>
       new Response(_body || null, { status: _status, headers: _headers });
 

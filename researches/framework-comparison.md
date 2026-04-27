@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router, graceful shutdown, reflect-metadata removed, test framework)
+> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router, graceful shutdown, reflect-metadata removed, test framework, hot-path optimizations T-11–T-19)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -23,7 +23,7 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 | Framework | Overhead vs raw `http.createServer` | Why |
 |---|---|---|
-| **Velocity (Bun.serve())** | ~13% at c=200 | Adapter layer + response wrapping (15,522 vs 17,818 req/sec; trie router now in place) |
+| **Velocity (Bun.serve())** | ~13% at c=200 (pre-T-11–T-19; not yet re-benchmarked) | Adapter layer + response wrapping (15,522 vs 17,818 req/sec; trie router + hot-path optimizations now in place) |
 | **Velocity (node:http / Node.js)** | ~15% | Same overhead, slower absolute (5,070 vs 5,990 req/sec) |
 | **Fastify** | ~10-15% | Highly optimized find-my-way router, schema compilation |
 | **Express** | ~40-50% | Regex-based routing, middleware chain per request |
@@ -66,7 +66,7 @@ Database drivers (pg, mysql2, bun:sqlite) are **lazily loaded** via dynamic `imp
 - `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache. Since `connect()` is called once at startup, there is no per-request overhead.
 
 **Framework overhead (within each engine):**
-- Velocity on Bun adds ~26–30 MB over the raw `Bun.serve()` baseline — joi + framework code. `reflect-metadata` removed (T-09); Winston removed (T-02) — both were the main contributors to the previous ~29–33 MB figure.
+- Velocity on Bun adds ~26–30 MB over the raw `Bun.serve()` baseline — joi + framework code. `reflect-metadata` removed (T-09); Winston removed (T-02); `node:http` conditionally loaded (T-19) — all were contributors to the previous ~29–33 MB figure.
 - Fastify on Node adds ~20–25 MB over the raw `http.createServer` baseline.
 - NestJS on Node adds ~64–69 MB over the raw baseline — DI system, reflect-metadata, module graph.
 
@@ -89,6 +89,9 @@ The throughput advantage of Bun is in req/sec (15,522 vs ~5,070 req/sec), not in
 | OpenAPI/Swagger gen | NestJS, Fastify, Elysia | Not implemented |
 | Guards/Pipes | NestJS | Middleware + interceptors cover most cases |
 | Cookie/session | Express, NestJS, Fastify | Not implemented |
+| Typed client generation | Elysia (Eden Treaty), tRPC | Not implemented (planned T-SE-08) |
+| Lifecycle hooks (onRequest/onResponse) | Elysia, Fastify, Hono | Not implemented (planned T-SE-09) |
+| Response compression (gzip/brotli) | All major frameworks | Not implemented (planned T-SE-10) |
 
 ## Where Velocity Wins
 
@@ -132,4 +135,5 @@ Velocity is closest in philosophy to **Fastify** (performance-focused, Node-nati
 - Raw `Bun.serve()` baseline: **~17,818 req/sec**
 - Framework overhead: **~13%** (at c=200; rises to ~33% at c=100 due to adapter layer cost)
 - Idle RSS: **~75 MB no-DB / ~79 MB with SQLite** (winston removed; pg and mysql2 never imported)
-- Main remaining overhead sources: Bun adapter req/res shim, double URL parse (trie router now in place — route count no longer a factor)
+- Hot-path optimizations applied (T-11–T-19): single URL parse, pre-computed CORS, shared response methods, lazy headers/query, conditional `node:http` import
+- Main remaining overhead sources: Bun adapter req/res shim (trie router + hot-path optimizations now in place — route count and per-request allocations no longer dominant factors)
