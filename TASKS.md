@@ -60,13 +60,34 @@ path. Most visible under high concurrency with parameterized routes (T-01 follow
 
 ---
 
-### T-05: Trie/radix router
+### T-05: Trie/radix router — DONE
 **Area:** Performance at scale
-The current router is a linear scan: O(n) per request over all registered routes.
-Replace with a radix tree. Options: minimal internal implementation (~150 lines) or
-`find-my-way` (Fastify's router, zero transitive deps) as a peer dep.
-**Impact:** Negligible for small apps (<20 routes); significant for large route tables (50+).
-Reduces overhead vs raw `Bun.serve()` when route count grows.
+Replaced the O(n) linear route scan (T-04's `compiledRoutes` array) with a segment-trie
+(`TrieNode`) built once at `listen()` time. Zero external dependencies — ~50 lines internal.
+
+**Trie structure:**
+```typescript
+interface TrieNode {
+  children: Map<string, TrieNode>;               // literal segment → child
+  paramChild: { name: string; node: TrieNode } | null;  // :param child
+  handlers: Map<string, { route, controller }>;  // HTTP method → handler
+}
+```
+
+**Route lookup** (`findRoute` → `walkTrie`):
+- Split pathname by `/` once → O(k) segments
+- At each level: try literal `Map.get()` first (O(1)), fall back to `paramChild`
+- Literal routes always take priority over param routes at the same depth
+  (e.g. `GET /users/settings` matches before `GET /users/:id`)
+- Total per-request cost: O(k) trie node lookups, k = path segment count
+  — independent of total route count
+
+**Route registration** (`buildTrie` + `insertRoute`):
+- Called once at `listen()` time, O(n×k) total build cost
+- `compilePattern`, `compileRoutes`, `compiledRoutes` removed (dead code after T-04→T-05)
+
+**Impact:** Negligible difference for small apps; O(n) → O(k) means route-count no longer
+affects request latency — large route tables (50+) no longer degrade throughput.
 
 ---
 

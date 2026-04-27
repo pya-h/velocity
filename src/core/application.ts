@@ -23,12 +23,10 @@ interface PendingRegistration {
   options: RegisterOptions;
 }
 
-interface CompiledRoute {
-  regex: RegExp;
-  paramNames: string[];
-  method: string;
-  controller: any;
-  route: RouteMetadata;
+interface TrieNode {
+  children: Map<string, TrieNode>;
+  paramChild: { name: string; node: TrieNode } | null;
+  handlers: Map<string, { route: RouteMetadata; controller: any }>;
 }
 
 export class VelocityApplication {
@@ -39,7 +37,7 @@ export class VelocityApplication {
   private controllers: Map<string, any> = new Map();
   private routes: Map<string, RouteMetadata[]> = new Map();
   private functionRegistry = new Map<string, { instance: any; method: string }>();
-  private compiledRoutes: CompiledRoute[] = [];
+  private routerTrie: TrieNode = { children: new Map(), paramChild: null, handlers: new Map() };
   private databases: Database[] = [];
 
   private pendingServices: PendingRegistration[] = [];
@@ -373,7 +371,7 @@ export class VelocityApplication {
     const finalHost = host || this.config.get('host') || '0.0.0.0';
 
     this.initializeRegistrations();
-    this.compileRoutes();
+    this.buildTrie();
     await this.initializeDatabases();
 
     this.logger.info('Application initialized successfully');
@@ -616,50 +614,63 @@ export class VelocityApplication {
     }
   }
 
-  private compilePattern(pattern: string): { regex: RegExp; paramNames: string[] } {
-    const paramNames: string[] = [];
+  private insertRoute(pattern: string, method: string, route: RouteMetadata, controller: any): void {
     const parts = pattern.split('/').filter(p => p !== '');
-
-    if (parts.length === 0) {
-      return { regex: /^\/$/, paramNames: [] };
-    }
-
-    const segments = parts.map(part => {
+    let node = this.routerTrie;
+    for (const part of parts) {
       if (part.startsWith(':')) {
         const name = part.slice(1);
-        paramNames.push(name);
-        return `(?<${name}>[^/]+)`;
+        if (!node.paramChild) {
+          node.paramChild = { name, node: { children: new Map(), paramChild: null, handlers: new Map() } };
+        }
+        node = node.paramChild.node;
+      } else {
+        if (!node.children.has(part)) {
+          node.children.set(part, { children: new Map(), paramChild: null, handlers: new Map() });
+        }
+        node = node.children.get(part)!;
       }
-      return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    });
-
-    return { regex: new RegExp(`^/${segments.join('/')}$`), paramNames };
+    }
+    node.handlers.set(method, { route, controller });
   }
 
-  private compileRoutes(): void {
-    this.compiledRoutes = [];
+  private buildTrie(): void {
+    this.routerTrie = { children: new Map(), paramChild: null, handlers: new Map() };
     for (const [basePath, routes] of this.routes.entries()) {
       const controller = this.controllers.get(basePath);
       for (const route of routes) {
-        const { regex, paramNames } = this.compilePattern(basePath + route.path);
-        this.compiledRoutes.push({ regex, paramNames, method: route.method, controller, route });
+        this.insertRoute(basePath + route.path, route.method, route, controller);
       }
     }
   }
 
-  private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {
-    for (const cr of this.compiledRoutes) {
-      if (cr.method !== method) continue;
-      const match = cr.regex.exec(pathname);
-      if (match) {
-        const params: Record<string, string> = {};
-        for (const name of cr.paramNames) {
-          params[name] = match.groups![name];
-        }
-        return { controller: cr.controller, route: cr.route, params };
-      }
+  private walkTrie(node: TrieNode, parts: string[], index: number, params: Record<string, string>): TrieNode | null {
+    if (index === parts.length) return node;
+    const segment = parts[index];
+
+    // Literal match takes priority over param match
+    const literalChild = node.children.get(segment);
+    if (literalChild) {
+      const result = this.walkTrie(literalChild, parts, index + 1, params);
+      if (result) return result;
     }
-    return { controller: null, route: null, params: {} };
+
+    if (node.paramChild) {
+      params[node.paramChild.name] = segment;
+      return this.walkTrie(node.paramChild.node, parts, index + 1, params);
+    }
+
+    return null;
+  }
+
+  private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {
+    const parts = pathname.split('/').filter(p => p !== '');
+    const params: Record<string, string> = {};
+    const node = this.walkTrie(this.routerTrie, parts, 0, params);
+    if (!node) return { controller: null, route: null, params: {} };
+    const handler = node.handlers.get(method);
+    if (!handler) return { controller: null, route: null, params: {} };
+    return { controller: handler.controller, route: handler.route, params };
   }
 
   // ─── Background goroutines (@Go) ───
