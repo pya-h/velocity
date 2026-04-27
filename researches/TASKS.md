@@ -260,22 +260,21 @@ the computed value (self-memoizing). Routes that never touch `req.query` skip th
 
 ---
 
-### T-16: Per-route compiled handler functions (Elysia-style JIT)
+### T-16: Per-route compiled handler functions (Elysia-style JIT) — DONE
 **Area:** Throughput (hot path branching)
-**Problem:** `handleRequest()` has a chain of runtime `if` checks on every request: CORS? static
-file? body parse? `.` function dispatch? middleware array? interceptors array? Each check adds
-branch prediction misses and prevents V8 from inlining the fast path.
-**Fix:** At `buildTrie()` time, for each registered route, generate a specialized handler function
-that **only includes the logic that route actually needs**:
-- Route has no middleware → skip the middleware loop entirely
-- Route has no interceptors → skip the interceptor loop
-- Route is GET → skip body parsing
-- Route has no `@Fn` → skip `pathname.startsWith('/.')` check
-This is the core technique behind Elysia's performance: each route gets a minimal, straight-line
-handler compiled once at startup. The trie leaf stores the compiled function instead of raw
-metadata.
-**Expected impact:** Significant — eliminates 4-6 conditional branches per request. The combined
-effect of T-11 through T-16 could bring Bun overhead from ~13% down toward ~5-8%.
+`handleRequest()` had a chain of runtime `if` checks on every request: body parse? middleware
+array? interceptors? Each check added branches and prevented V8/JSC from inlining.
+**Fix:** `compileRouteHandler()` runs once per route at `buildTrie()` time. It generates a
+specialized `CompiledRouteHandler` closure that includes **only** the logic that route needs:
+- GET routes → no body parsing in the closure
+- Routes with no middleware → no middleware loop
+- Routes with no interceptors → no interceptor loop
+Each compiled handler also includes its own try/catch, so `handleRequest` just calls
+`match.compiled(req, res)` after routing — zero per-request conditional branching.
+`findRoute()` now returns `{ compiled, params } | null` instead of raw metadata.
+Body parsing moved from pre-routing into the compiled handler (404s no longer waste time parsing).
+**Result:** All optimization tasks T-11 through T-16 complete. Combined expected overhead
+reduction: ~13% → ~5-8% (not yet re-benchmarked).
 
 ---
 

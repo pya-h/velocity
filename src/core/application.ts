@@ -41,10 +41,12 @@ interface PendingRegistration {
   options: RegisterOptions;
 }
 
+type CompiledRouteHandler = (req: VelocityRequest, res: VelocityResponse) => Promise<void>;
+
 interface TrieNode {
   children: Map<string, TrieNode>;
   paramChild: { name: string; node: TrieNode } | null;
-  handlers: Map<string, { route: RouteMetadata; controller: any }>;
+  handlers: Map<string, { route: RouteMetadata; controller: any; compiled: CompiledRouteHandler }>;
 }
 
 export class VelocityApplication {
@@ -534,10 +536,6 @@ export class VelocityApplication {
 
       if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
 
-      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-        velocityReq.body = await this.parseBody(req);
-      }
-
       // Lazy query parsing — only allocates when handler accesses req.query
       Object.defineProperty(velocityReq, 'query', {
         get() {
@@ -554,44 +552,17 @@ export class VelocityApplication {
         return;
       }
 
-      const { controller, route, params } = this.findRoute(pathname || '/', method);
+      const match = this.findRoute(pathname || '/', method);
 
-      if (!controller || !route) {
+      if (!match) {
         velocityRes.status(404).json({ error: 'Route not found' });
         return;
       }
 
-      velocityReq.params = params;
+      velocityReq.params = match.params;
 
-      if (route.middlewares) {
-        for (const middleware of route.middlewares) {
-          let nextCalled = false;
-          await middleware(velocityReq, velocityRes, () => { nextCalled = true; });
-          if (!nextCalled) {
-            if (!velocityRes.headersSent) {
-              velocityRes.status(500).json({ error: 'Middleware did not send a response' });
-            }
-            return;
-          }
-        }
-      }
-
-      const result = await controller[route.handler](velocityReq, velocityRes);
-
-      let finalResult = result;
-      if (route.interceptors) {
-        for (const interceptor of route.interceptors) {
-          finalResult = await interceptor(finalResult, velocityReq, velocityRes);
-        }
-      }
-
-      if (!velocityRes.headersSent) {
-        if (finalResult !== undefined) {
-          velocityRes.json(finalResult);
-        } else {
-          velocityRes.status(204).send('');
-        }
-      }
+      // Compiled handler includes body parsing, middleware, interceptors, error handling
+      await match.compiled(velocityReq, velocityRes);
 
     } catch (error) {
       this.logger.error('Request handling error:', error);
@@ -703,7 +674,9 @@ export class VelocityApplication {
         node = node.children.get(part)!;
       }
     }
-    node.handlers.set(method, { route, controller });
+    const needsBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
+    const compiled = this.compileRouteHandler(controller, route, needsBody);
+    node.handlers.set(method, { route, controller, compiled });
   }
 
   private buildTrie(): void {
@@ -749,6 +722,73 @@ export class VelocityApplication {
     };
   }
 
+  private compileRouteHandler(
+    controller: any,
+    route: RouteMetadata,
+    needsBody: boolean,
+  ): CompiledRouteHandler {
+    const method = route.handler;
+    const middlewares = route.middlewares?.length ? route.middlewares : null;
+    const interceptors = route.interceptors?.length ? route.interceptors : null;
+    const parseBody = needsBody ? this.parseBody.bind(this) : null;
+    const logger = this.logger;
+
+    // Fast path: GET-like route, no middleware, no interceptors
+    if (!middlewares && !interceptors && !parseBody) {
+      return async (req, res) => {
+        try {
+          const result = await controller[method](req, res);
+          if (!res.headersSent) {
+            if (result !== undefined) res.json(result);
+            else res.status(204).send('');
+          }
+        } catch (error) {
+          logger.error('Request handling error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({
+              error: 'Internal Server Error',
+              message: error instanceof Error ? error.message : 'Unknown error',
+            });
+          }
+        }
+      };
+    }
+
+    // General path: any combination of body/middleware/interceptors
+    return async (req, res) => {
+      try {
+        if (parseBody) req.body = await parseBody(req as any);
+        if (middlewares) {
+          for (const mw of middlewares) {
+            let nextCalled = false;
+            await mw(req, res, () => { nextCalled = true; });
+            if (!nextCalled) {
+              if (!res.headersSent) res.status(500).json({ error: 'Middleware did not send a response' });
+              return;
+            }
+          }
+        }
+        const result = await controller[method](req, res);
+        let finalResult = result;
+        if (interceptors) {
+          for (const ic of interceptors) finalResult = await ic(finalResult, req, res);
+        }
+        if (!res.headersSent) {
+          if (finalResult !== undefined) res.json(finalResult);
+          else res.status(204).send('');
+        }
+      } catch (error) {
+        logger.error('Request handling error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: 'Internal Server Error',
+            message: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+    };
+  }
+
   private walkTrie(node: TrieNode, parts: string[], index: number, params: Record<string, string>): TrieNode | null {
     if (index === parts.length) return node;
     const segment = parts[index];
@@ -776,14 +816,14 @@ export class VelocityApplication {
     return null;
   }
 
-  private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {
+  private findRoute(pathname: string, method: string): { compiled: CompiledRouteHandler; params: Record<string, string> } | null {
     const parts = pathname.split('/').filter(p => p !== '');
     const params: Record<string, string> = {};
     const node = this.walkTrie(this.routerTrie, parts, 0, params);
-    if (!node) return { controller: null, route: null, params: {} };
+    if (!node) return null;
     const handler = node.handlers.get(method);
-    if (!handler) return { controller: null, route: null, params: {} };
-    return { controller: handler.controller, route: handler.route, params };
+    if (!handler) return null;
+    return { compiled: handler.compiled, params };
   }
 
   // ─── Background goroutines (@Go) ───
