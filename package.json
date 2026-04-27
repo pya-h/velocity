@@ -6,19 +6,18 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "sync": "node scripts/sync.js",
-    "dev": "npm run build && npm run sync",
-    "velogen": "node scripts/velogen.js",
-    "envgen": "node scripts/envgen.js",
-    "apitester": "node scripts/apitester.js",
-    "demo": "cd examples/full-demo && node -r ../../node_modules/ts-node/register main.ts",
-    "test": "jest"
+    "sync": "bun scripts/sync.js",
+    "dev": "bun run build && bun run sync",
+    "velogen": "bun scripts/velogen.js",
+    "envgen": "bun scripts/envgen.js",
+    "apitester": "bun scripts/apitester.js",
+    "demo": "cd examples/full-demo && bun run main.ts",
+    "test": "bun test"
   },
   "keywords": ["typescript", "framework", "orm", "decorators", "minimal"],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "better-sqlite3": "^12.2.0",
     "joi": "^18.0.1",
     "mysql2": "^3.14.3",
     "pg": "^8.16.3",
@@ -26,10 +25,8 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.3.0",
     "@types/pg": "^8.15.5",
-    "typescript": "^5.9.2",
-    "ts-node": "^10.9.2"
+    "bun-types": "latest",
+    "typescript": "^5.9.2"
   }
 }

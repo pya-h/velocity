@@ -401,7 +401,13 @@ export class VelocityApplication {
 
     this.logger.info('Application initialized successfully');
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      this.server.once('error', (err: NodeJS.ErrnoException) => {
+        const msg = err.code === 'EADDRINUSE'
+          ? `Port ${finalPort} is already in use`
+          : `Failed to start server: ${err.message}`;
+        reject(new Error(msg));
+      });
       this.server.listen(finalPort, finalHost, () => {
         this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
         resolve();

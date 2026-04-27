@@ -1,5 +1,5 @@
 import { DatabaseConfig } from '../types';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { Client as PgClient } from 'pg';
 import mysql from 'mysql2/promise';
 
@@ -53,7 +53,7 @@ export class DatabaseConnection {
     switch (this.config.type) {
       case 'sqlite':
         const stmt = this.connection.prepare(sql);
-        return stmt.all(params);
+        return stmt.all(...params);
       
       case 'postgresql':
         const result = await this.connection.query(this.toPgParams(sql), params);
@@ -72,7 +72,7 @@ export class DatabaseConnection {
     switch (this.config.type) {
       case 'sqlite':
         const stmt = this.connection.prepare(sql);
-        return stmt.run(params);
+        return stmt.run(...params);
       
       case 'postgresql':
         return await this.connection.query(this.toPgParams(sql), params);
