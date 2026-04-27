@@ -12,6 +12,7 @@ export { Interceptor, UseInterceptor } from './decorators/interceptor';
 export { Service } from './decorators/service';
 export { Go } from './decorators/go';
 export { Channel } from './decorators/channel';
+export { Fn } from './decorators/fn';
 export { VelocityChannel } from './channel/channel';
 
 // ORM exports

@@ -3,6 +3,7 @@ import {
   UseMiddleware, UseInterceptor,
   Validate, Validator,
   TransformInterceptor,
+  Fn,
 } from '@velocity/framework';
 import type { VelocityRequest, VelocityResponse, MiddlewareFunction } from '@velocity/framework';
 import { db } from '../../db';
@@ -66,6 +67,28 @@ class UserController {
 
     await db.User.delete(id);
     return res.status(204).send('');
+  }
+
+  // ── HTTP Functions (/. namespace) ───────────────────────────────────────
+  // Called as: GET /.findUser(1)
+  @Fn()
+  async findUser(id: number) {
+    const user = await db.User.findById(id);
+    if (!user) throw new Error(`User ${id} not found`);
+    return user;
+  }
+
+  // Called as: GET /.countUsers()
+  @Fn()
+  async countUsers() {
+    const users = await db.User.findAll();
+    return users.length;
+  }
+
+  // Called as: GET /.greet("Alice",true)  or  GET /.greet(Bob,false)
+  @Fn()
+  async greet(name: string, formal: boolean) {
+    return { message: formal ? `Good day, ${name}.` : `Hey ${name}!` };
   }
 }
 

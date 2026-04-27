@@ -5,7 +5,7 @@
  *
  * Run:  npm run demo
  *
- * Try:
+ * REST endpoints:
  *   curl localhost:5000/api/health
  *   curl localhost:5000/api/users
  *   curl -X POST localhost:5000/api/users \
@@ -13,6 +13,12 @@
  *        -H "Authorization: Bearer demo" \
  *        -d '{"name":"Alice","email":"alice@example.com","age":28}'
  *   curl localhost:5000/api/posts
+ *
+ * HTTP Functions (@Fn — /.name(args) syntax):
+ *   curl 'localhost:5000/.findUser(1)'
+ *   curl 'localhost:5000/.countUsers()'
+ *   curl 'localhost:5000/.greet("Alice",true)'
+ *   curl 'localhost:5000/.greet(Bob,false)'
  */
 
 import * as path from 'path';

@@ -12,6 +12,7 @@ import {
   RouteMetadata, ControllerMetadata, RegisterOptions,
 } from '../types';
 import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
+import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decorators/fn';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
@@ -29,6 +30,7 @@ export class VelocityApplication {
   private config: Config;
   private controllers: Map<string, any> = new Map();
   private routes: Map<string, RouteMetadata[]> = new Map();
+  private functionRegistry = new Map<string, { instance: any; method: string }>();
   private databases: Database[] = [];
 
   private pendingServices: PendingRegistration[] = [];
@@ -241,6 +243,15 @@ export class VelocityApplication {
       this.controllerPaths.set(controllerClass, finalPath);
       this.logger.info(`Registered controller: ${controllerClass.name} at ${finalPath}`);
     }
+
+    const fnDefs: FnDef[] = Reflect.getMetadata(FN_METADATA_KEY, controllerClass) ?? [];
+    for (const def of fnDefs) {
+      if (this.functionRegistry.has(def.name)) {
+        this.logger.warn(`@Fn: "/.${def.name}" already registered — overwriting`);
+      }
+      this.functionRegistry.set(def.name, { instance: controller, method: def.method });
+      this.logger.info(`Registered function: /.${def.name} → ${controllerClass.name}.${def.method}`);
+    }
   }
 
   private initializeRegistrations(): void {
@@ -443,6 +454,11 @@ export class VelocityApplication {
 
       velocityReq.query = Object.fromEntries(url.searchParams);
 
+      if (pathname.startsWith('/.')) {
+        await this.dispatchFunction(pathname, velocityReq, velocityRes);
+        return;
+      }
+
       const { controller, route, params } = this.findRoute(pathname || '/', method);
 
       if (!controller || !route) {
@@ -558,6 +574,36 @@ export class VelocityApplication {
       });
       req.on('error', reject);
     });
+  }
+
+  private async dispatchFunction(pathname: string, _req: VelocityRequest, res: VelocityResponse): Promise<void> {
+    const call = parseFunctionCall(pathname);
+    if (!call) {
+      res.status(404).json({ error: 'Route not found' });
+      return;
+    }
+
+    if (call.rawArgs.length > 2000) {
+      res.status(400).json({ error: 'Function argument string too long (max 2000 chars)' });
+      return;
+    }
+
+    const fn = this.functionRegistry.get(call.name);
+    if (!fn) {
+      res.status(404).json({ error: `Function "${call.name}" not found` });
+      return;
+    }
+
+    const args = parseFnArgs(call.rawArgs);
+    const result = await fn.instance[fn.method](...args);
+
+    if (!res.headersSent) {
+      if (result !== undefined) {
+        res.json(result);
+      } else {
+        res.status(204).send('');
+      }
+    }
   }
 
   private findRoute(pathname: string, method: string): { controller: any; route: RouteMetadata; params: Record<string, string> } | { controller: null; route: null; params: {} } {

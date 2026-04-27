@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-27 (updated — Bun refactor)
+> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -81,7 +81,8 @@ Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node
 - **DI without module boilerplate**: NestJS requires `@Module({ imports, controllers, providers })` for every feature. Velocity: just `velo.register(X)`.
 - **Type-safe env config**: Envelocity generates types from `.env` — zero runtime cost for type safety, OrThrow without function calls.
 - **Built-in API tester**: `npm run apitester` generates an interactive testing UI from decorators — no Postman, no Swagger setup, no external tools. No other framework does this.
-- **`@Go()` background goroutines**: Service methods decorated with `@Go()` launch in a real **Bun Worker thread** when the server starts — true OS-level parallelism, not event-loop concurrency. Accepts `{ data }` for passing initial config to the worker. No other framework has this.
+- **`@Go()` background goroutines with `@Channel` injection**: Service methods decorated with `@Go()` launch in a real **Bun Worker thread** when the server starts — true OS-level parallelism, not event-loop concurrency. `VelocityChannel<T>` (backed by `BroadcastChannel`) provides typed cross-thread message passing. Channels are injected into worker methods via `@Channel('name')` parameter decorators — no manual instantiation needed. No other framework has this.
+- **HTTP Function Calls (`@Fn`)**: Mark any controller method with `@Fn()` and it becomes callable at `GET /.functionName(arg1,arg2,...)`. Arguments are parsed directly from the URL — numbers, booleans, `null`, quoted strings — with no req/res boilerplate. Great for simple RPC-style queries and internal tooling. No equivalent in any listed framework.
 - **Static file serving**: `velo.serve()` and `velo.static()` — single files or directories, with MIME detection and path traversal protection.
 - **Config-based CORS**: Set `cors: { origin: '*' }` in config — automatic `Access-Control-*` headers and OPTIONS handling. No middleware to install.
 
