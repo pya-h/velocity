@@ -47,6 +47,7 @@ export class VelocityApplication {
   private fileMounts = new Map<string, string>();
   private dirMounts: { prefix: string; dir: string }[] = [];
   private goServiceClasses: any[] = [];
+  private activeRequests = 0;
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -384,6 +385,7 @@ export class VelocityApplication {
       });
       this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
       this.startGoMethods();
+      this.maybeRegisterSignalHandlers();
       return;
     }
 
@@ -397,28 +399,57 @@ export class VelocityApplication {
       this.server.listen(finalPort, finalHost, () => {
         this.logger.info(`Server running on http://${finalHost}:${finalPort}`);
         this.startGoMethods();
+        this.maybeRegisterSignalHandlers();
         resolve();
       });
     });
   }
 
   public async close(): Promise<void> {
+    this.logger.info('Shutting down gracefully...');
+    const timeout = this.config.get('shutdown')?.timeout ?? 5000;
+
     for (const db of this.databases) {
       await db.close();
     }
 
     if (IS_BUN) {
-      this.server?.stop(true);
+      this.server?.stop(false); // stop accepting; existing requests keep processing
+      await this.waitForDrain(timeout);
       this.logger.info('Server closed');
       return;
     }
 
+    this.server.close(); // stop accepting new connections
+    await this.waitForDrain(timeout);
+    this.logger.info('Server closed');
+  }
+
+  private waitForDrain(timeout: number): Promise<void> {
     return new Promise((resolve) => {
-      this.server.close(() => {
-        this.logger.info('Server closed');
-        resolve();
-      });
+      if (this.activeRequests <= 0) { resolve(); return; }
+      const deadline = Date.now() + timeout;
+      const iv = setInterval(() => {
+        if (this.activeRequests <= 0 || Date.now() >= deadline) {
+          clearInterval(iv);
+          if (this.activeRequests > 0) {
+            this.logger.warn(
+              `Shutdown: ${this.activeRequests} in-flight request(s) still active after ${timeout}ms — proceeding anyway`,
+            );
+          }
+          resolve();
+        }
+      }, 50);
     });
+  }
+
+  private maybeRegisterSignalHandlers(): void {
+    if (!this.config.get('shutdown')?.auto) return;
+    const handler = () => {
+      this.close().then(() => process.exit(0)).catch(() => process.exit(1));
+    };
+    process.once('SIGTERM', handler);
+    process.once('SIGINT', handler);
   }
 
   public getContainer(): Container {
@@ -428,6 +459,15 @@ export class VelocityApplication {
   // ─── Request handling ───
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Track in-flight requests for graceful shutdown (Bun path tracks in bunFetchHandler)
+    if (!(req as any).__bunSkipStatic) {
+      this.activeRequests++;
+      let counted = true;
+      const done = () => { if (counted) { counted = false; this.activeRequests--; } };
+      res.on('finish', done);
+      res.on('close', done);
+    }
+
     const velocityReq = req as VelocityRequest;
     const velocityRes = this.enhanceResponse(res);
 
@@ -735,18 +775,23 @@ export class VelocityApplication {
   // ─── Bun.serve() adapter ───
 
   private async bunFetchHandler(request: Request): Promise<Response> {
-    const reqUrl = new URL(request.url);
-    const pathname = reqUrl.pathname;
-    const method = request.method.toUpperCase();
+    this.activeRequests++;
+    try {
+      const reqUrl = new URL(request.url);
+      const pathname = reqUrl.pathname;
+      const method = request.method.toUpperCase();
 
-    if (method === 'GET') {
-      const staticResp = this.tryServeStaticBun(pathname, request.headers);
-      if (staticResp) return staticResp;
+      if (method === 'GET') {
+        const staticResp = this.tryServeStaticBun(pathname, request.headers);
+        if (staticResp) return staticResp;
+      }
+
+      const { req, res, getResponse } = this.createBunReqRes(request, reqUrl);
+      await this.handleRequest(req, res);
+      return getResponse();
+    } finally {
+      this.activeRequests--;
     }
-
-    const { req, res, getResponse } = this.createBunReqRes(request, reqUrl);
-    await this.handleRequest(req, res);
-    return getResponse();
   }
 
   private tryServeStaticBun(pathname: string, requestHeaders: Headers): Response | null {

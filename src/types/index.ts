@@ -82,6 +82,12 @@ export interface ApplicationConfig {
   };
   globalPrefix?: string;
   globalPrefixExclusions?: string[];
+  shutdown?: {
+    /** ms to wait for in-flight requests before forcing close. Default: 5000 */
+    timeout?: number;
+    /** Auto-register SIGTERM/SIGINT handlers that call close() + process.exit(). Default: false */
+    auto?: boolean;
+  };
 }
 
 export interface EntityMetadata {

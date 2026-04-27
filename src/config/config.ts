@@ -21,7 +21,8 @@ export class Config {
         max: 100
       },
       globalPrefix: config.globalPrefix,
-      globalPrefixExclusions: config.globalPrefixExclusions
+      globalPrefixExclusions: config.globalPrefixExclusions,
+      shutdown: config.shutdown,
     };
   }
 

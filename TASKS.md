@@ -120,13 +120,35 @@ A hard 1 MB cap (`MAX_BODY_SIZE`) already exists in `parseBody()` for both the N
 
 ---
 
-### T-08: Graceful shutdown (`velo.close()`) — partial
-`close()` already closes DB connections and stops the server. Remaining gaps:
-- No `SIGTERM`/`SIGINT` handlers registered automatically
-- No in-flight request draining (waits for `server.close()` but Node/Bun stop accepting
-  new connections immediately without a drain timeout)
-Add optional `shutdown: { timeout: number }` config and auto-register signal handlers when
-`shutdown.auto` is `true`.
+### T-08: Graceful shutdown (`velo.close()`) — DONE
+Added `shutdown?: { timeout?: number; auto?: boolean }` to `ApplicationConfig`.
+
+**In-flight request draining:**
+- `activeRequests` counter incremented/decremented per request on both runtimes:
+  - **Node:** tracked in `handleRequest()` via `res.on('finish')` / `res.on('close')`
+  - **Bun:** tracked in `bunFetchHandler()` via try/finally
+- `waitForDrain(timeout)` polls every 50 ms until `activeRequests === 0` or deadline; logs a
+  warning and resolves anyway if requests remain after timeout.
+
+**`close()` sequence:**
+1. Log "Shutting down gracefully..."
+2. Close all DB connections
+3. Stop accepting new connections (`server.stop(false)` on Bun, `server.close()` on Node)
+4. `await waitForDrain(timeout)` — default 5 000 ms
+5. Log "Server closed"
+
+**Signal handlers (`shutdown.auto: true`):**
+`process.once('SIGTERM', handler)` and `process.once('SIGINT', handler)` registered after
+`listen()` resolves. Handler calls `close()` then `process.exit(0/1)`.
+
+```typescript
+export const velo = new VelocityApplication({
+  port: 5000,
+  shutdown: { timeout: 10_000, auto: true }, // register SIGTERM/SIGINT automatically
+});
+await velo.listen();
+// or manually: process.on('SIGTERM', () => velo.close());
+```
 
 ---
 
@@ -149,6 +171,57 @@ limiting, error handling.
 ---
 
 ## Support Expanding
+
+### T-SE-07: File upload support
+**Who has it:** All major frameworks (Express via `multer`, Fastify via `@fastify/multipart`, NestJS via `@UploadedFile()`, Elysia natively).
+**Current state:** `parseBody()` treats `multipart/form-data` as raw text. The 1 MB `MAX_BODY_SIZE` cap also blocks any realistic file upload before parsing begins.
+
+**Approach:**
+- **Bun path:** `bunReq.formData()` parses multipart natively — zero new deps. Extract `File` entries into structured `UploadedFile` objects.
+- **Node path:** Use `busboy` (peer dep, ~40 KB, what `multer` uses internally) to stream-parse the multipart boundary.
+- Expose files on `req.files: Record<string, UploadedFile | UploadedFile[]>` (field name → file).
+- Add `@UploadedFile(field?)` parameter decorator — injects a single file from `req.files`.
+- Add `@UploadedFiles(field?)` parameter decorator — injects an array (multi-file fields).
+- Per-route upload size limit via `@Upload({ maxSize: number, maxFiles?: number })` — overrides the global 1 MB cap for that route only. Without this decorator, `multipart/form-data` requests still hit the 1 MB cap.
+- Buffer mode (default) — full file in memory as `Buffer`. Stream mode opt-in (`@Upload({ stream: true })`) — passes a readable stream; useful for large files piped directly to object storage.
+
+```typescript
+@Post('/avatar')
+@Upload({ maxSize: 5 * 1024 * 1024 }) // 5 MB for this route
+async uploadAvatar(
+  @UploadedFile('avatar') file: UploadedFile,
+  req: VelocityRequest,
+) {
+  // file.buffer, file.originalname, file.mimetype, file.size
+  await storage.save(file.buffer, file.originalname);
+  return { url: `/uploads/${file.originalname}` };
+}
+
+@Post('/gallery')
+@Upload({ maxSize: 20 * 1024 * 1024, maxFiles: 10 })
+async uploadGallery(
+  @UploadedFiles('photos') photos: UploadedFile[],
+) {
+  return { count: photos.length };
+}
+```
+
+**UploadedFile shape:**
+```typescript
+interface UploadedFile {
+  fieldname: string;
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;      // buffer mode
+  stream?: Readable;   // stream mode only
+}
+```
+
+**Implementation:** `src/decorators/upload.ts` (`@Upload`, `@UploadedFile`, `@UploadedFiles`),
+`src/core/multipart.ts` (Bun-native + busboy Node fallback), wired into `parseBody()` / `handleRequest()`.
+
+---
 
 ### T-SE-01: WebSocket support
 **Who has it:** All major frameworks except Express.
