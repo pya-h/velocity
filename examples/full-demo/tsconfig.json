@@ -3,5 +3,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "typeRoots": ["../../node_modules"]
-  }
+  },
+  "include": ["./**/*"],
+  "exclude": ["node_modules"]
 }
