@@ -1,4 +1,4 @@
-import 'reflect-metadata';
+import './core/metadata';
 
 // Core exports
 export { VelocityApplication } from './core/application';

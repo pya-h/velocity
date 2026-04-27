@@ -1,6 +1,6 @@
 # Velocity Framework vs Major Backend Frameworks
 
-> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router)
+> Comparison date: 2026-04-27 (updated — @Fn HTTP functions, @Channel param injection, segment-trie router, graceful shutdown)
 > Velocity version: 0.1.0
 
 ## At a Glance
@@ -34,16 +34,30 @@ Absolute numbers are environment-dependent. What matters is **framework overhead
 
 ## Memory
 
-| Framework | Idle RSS (small app) |
-|---|---|
-| **Velocity (Bun, no DB)** | ~75 MB (measured: Bun + winston + joi + reflect-metadata only) |
-| **Velocity (Bun, SQLite)** | ~79 MB (measured: same + bun:sqlite built-in; pg/mysql2 never loaded) |
-| **Raw Bun `node:http`** | ~46 MB (baseline — no framework, no deps) |
-| **Express** | ~62 MB (Node.js) |
-| **Fastify** | ~45 MB (Node.js) |
-| **NestJS** | ~89 MB (Node.js) |
-| **Hono (Node)** | ~50 MB (Node.js) |
-| **Elysia (Bun)** | ~15 MB (Bun.serve() native, minimal deps) |
+> **Important:** Bun uses JavaScriptCore (JSC); Node.js uses V8. These engines have different
+> baseline footprints — JSC starts at ~40–46 MB before any framework code runs, while V8 starts
+> at ~20–25 MB. **Cross-engine comparisons are misleading** — a Node.js framework at 45 MB can
+> look "lighter" than an empty Bun process, not because it uses less memory, but because V8 is
+> a smaller engine at startup. Compare within the same engine.
+
+### Bun (JavaScriptCore)
+
+| | Idle RSS | Notes |
+|---|---|---|
+| Raw `Bun.serve()` (no deps) | ~40–46 MB | JSC baseline — engine + JIT + GC infrastructure |
+| **Velocity (Bun, no DB)** | ~75 MB | Measured: framework + joi + reflect-metadata |
+| **Velocity (Bun, SQLite)** | ~79 MB | Same + bun:sqlite (Bun built-in, no extra driver load) |
+| Elysia (Bun) | ~55–70 MB | Reported figures vary widely by measurement method |
+
+### Node.js (V8)
+
+| | Idle RSS | Notes |
+|---|---|---|
+| Raw `http.createServer` (no deps) | ~20–25 MB | V8 baseline |
+| Fastify | ~45 MB | V8 (~22 MB) + Fastify + find-my-way + dependencies |
+| Express | ~62 MB | V8 + Express + 28 production deps |
+| Hono (Node) | ~50 MB | V8 + Hono |
+| NestJS | ~89 MB | V8 + NestJS + TypeScript DI + reflect-metadata + transitive |
 
 Database drivers (pg, mysql2, bun:sqlite) are **lazily loaded** via dynamic `import()` inside `connect()` — they are never imported unless the configured driver type is actually used. This means:
 
@@ -51,9 +65,12 @@ Database drivers (pg, mysql2, bun:sqlite) are **lazily loaded** via dynamic `imp
 - `bun:sqlite` is a Bun built-in (no disk I/O, resolves from internal registry).
 - `pg` and `mysql2` incur a one-time parse+cache cost on the first `connect()` call, then hit the module cache. Since `connect()` is called once at startup, there is no per-request overhead.
 
-**Fair comparison note:** other frameworks in this table ship with no DB driver and no logger. Velocity's ~75 MB no-DB figure (vs raw Bun ~46 MB) reflects joi + reflect-metadata + the custom logger — the always-on framework dependencies. `pg` and `mysql2` are **never loaded** unless the configured type is `postgresql` or `mysql`, so they contribute nothing to RSS in a SQLite-only app.
+**Framework overhead (within each engine):**
+- Velocity on Bun adds ~29–33 MB over the raw `Bun.serve()` baseline — joi + reflect-metadata + framework code.
+- Fastify on Node adds ~20–25 MB over the raw `http.createServer` baseline.
+- NestJS on Node adds ~64–69 MB over the raw baseline — DI system, reflect-metadata, module graph.
 
-Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node's V8 at similar scale — this is why Velocity on Bun (~75 MB no-DB) doesn't look dramatically better than Express on Node (~62 MB). The throughput advantage is where Bun shows up (14,142 vs ~5,000 req/sec).
+The throughput advantage of Bun is in req/sec (15,522 vs ~5,070 req/sec), not in memory — JSC trades higher idle RSS for faster JIT-compiled execution.
 
 ## What Velocity Has That Others Don't
 
@@ -84,6 +101,7 @@ Bun's JavaScriptCore baseline (~46 MB for a raw HTTP server) is higher than Node
 - **HTTP Function Calls (`@Fn`)**: Mark any controller method with `@Fn()` and it becomes callable at `GET /.functionName(arg1,arg2,...)`. Arguments are parsed directly from the URL — numbers, booleans, `null`, quoted strings — with no req/res boilerplate. Great for simple RPC-style queries and internal tooling. No equivalent in any listed framework.
 - **Static file serving**: `velo.serve()` and `velo.static()` — single files or directories, with MIME detection and path traversal protection.
 - **Config-based CORS**: Set `cors: { origin: '*' }` in config — automatic `Access-Control-*` headers and OPTIONS handling. No middleware to install.
+- **Graceful shutdown with in-flight draining**: `shutdown: { timeout: 5000, auto: true }` config option. When enabled, SIGTERM/SIGINT handlers are registered automatically after `listen()`. `close()` stops accepting new connections, waits up to `timeout` ms for in-flight requests to complete (polling every 50 ms), then resolves — warn-and-continue if the deadline is exceeded. Works on both Node.js (`res.on('finish')` tracking) and Bun (`bunFetchHandler` try/finally). NestJS requires a separate `app.enableShutdownHooks()` call; Express/Fastify require manual signal handler wiring.
 
 ## Where Velocity Loses
 

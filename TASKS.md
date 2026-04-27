@@ -152,12 +152,24 @@ await velo.listen();
 
 ---
 
-### T-09: Remove `reflect-metadata` dependency
+### T-09: Remove `reflect-metadata` dependency — DONE
 **Area:** Memory / TC39 compatibility
-`reflect-metadata` (~2-3 MB) is a polyfill for `emitDecoratorMetadata`. Replacing it requires
-auditing all `Reflect.getMetadata('design:type', ...)` calls in the ORM/DI layers and replacing
-them with explicit `type` options in `@Column({ type: 'text' })` (already partially supported).
-**Risk:** High — touches the ORM decorator system. Requires thorough testing.
+
+Replaced the `reflect-metadata` npm package (~2-3 MB) with a zero-dep internal polyfill
+(`src/core/metadata.ts`, ~55 lines). Zero breaking changes — `design:paramtypes` (DI) and
+`design:type` (ORM column inference) continue to work identically.
+
+**How it works:** TypeScript's compiler (with `emitDecoratorMetadata: true`) doesn't care which
+implementation backs `Reflect` — it only checks `typeof Reflect.metadata === "function"` before
+emitting calls. The polyfill patches the global `Reflect` object with `defineMetadata`,
+`getMetadata`, and `metadata` before any decorator code runs. TypeScript-emitted `design:*`
+calls go through the same storage as custom framework metadata keys.
+
+**Changes:**
+- `src/core/metadata.ts` — WeakMap-based store with prototype chain walk; patches global `Reflect`
+- `src/types/reflect.d.ts` — type augmentation for the three added `Reflect` methods
+- `src/index.ts` — `import 'reflect-metadata'` → `import './core/metadata'`
+- `package.json` — `reflect-metadata` removed from dependencies
 
 ---
 
