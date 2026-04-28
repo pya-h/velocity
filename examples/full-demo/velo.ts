@@ -2,7 +2,7 @@
  * Velocity instance — imported by controllers, services, and db to self-register.
  * Separated from main.ts to avoid circular dependency issues.
  */
-import { VelocityApplication } from '@velocity/framework';
+import { VelocityApplication, Frame } from '@velocity/framework';
 import { envelocity } from './velo/envelocity';
 
 export const velo = new VelocityApplication({
@@ -30,4 +30,17 @@ export const velo = new VelocityApplication({
     timeout: 5000,
     auto: true,
   },
+});
+
+// ── Global ResponseFrame ────────────────────────────────────────────────────
+// All controllers use this frame unless they have their own @ResponseFrame.
+//
+// Every response becomes:
+//   { status: 200, data: <handler return>, error: null }
+//   { status: 500, data: null, error: "message" }
+
+velo.responseFrame({
+  status: Frame.Status,
+  data:   Frame.Data,
+  error:  Frame.Error,
 });

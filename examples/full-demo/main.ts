@@ -88,7 +88,7 @@ velo.onError((error, _req, res) => {
 // ── Static files & generated tools ──────────────────────────────────────────
 
 async function main() {
-  velo.serve('/apitester', path.join(__dirname, 'velo/apitester.html'));
+  velo.serve('/apit', path.join(__dirname, 'velo/apitester.html'));
   velo.serve('/api-docs', path.join(__dirname, 'velo/openapi.json'));
 
   await velo.listen();

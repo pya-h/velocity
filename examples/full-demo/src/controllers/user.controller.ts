@@ -4,6 +4,7 @@ import {
   Validate, Validator,
   TransformInterceptor,
   Status, StatusCode,
+  ResponseFrame, Frame,
   Fn,
 } from '@velocity/framework';
 import type { VelocityRequest, VelocityResponse, GuardFunction } from '@velocity/framework';
@@ -31,6 +32,17 @@ const createUserSchema = Validator.createSchema({
   age: Joi.number().integer().min(1).max(120).optional()
 });
 
+// Controller-level frame override — different from the global frame in velo.ts.
+// Extracts 'message' from handler responses into a top-level field.
+//
+// Response shape:
+//   { code: 200, result: <data without message>, error: null, message: "extracted" }
+@ResponseFrame({
+  code:    Frame.Status,
+  result:  Frame.Data,
+  error:   Frame.Error,
+  message: Frame.Extract('message', true), // optional — null if handler doesn't return it
+})
 @Controller('/users')
 class UserController {
   // ── @Status(200) + typed query — no res needed ────────────────────────────
@@ -61,12 +73,14 @@ class UserController {
   @Guards(authGuard)
   @Validate(createUserSchema)
   @Status(StatusCode.Created)
-  async create(body: CreateUserBody): Promise<{ user: unknown }> {
+  async create(body: CreateUserBody): Promise<{ user: unknown; message: string }> {
     const user = await db.User.create({
       ...body,
       createdAt: new Date().toISOString()
     });
-    return { user };
+    // 'message' gets extracted by Frame.Extract('message') into the top-level frame field.
+    // The remaining { user } becomes Frame.Data.
+    return { user, message: 'User created successfully' };
   }
 
   // ── Classic req + res (backward compat) ───────────────────────────────────

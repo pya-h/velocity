@@ -18,6 +18,8 @@ import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decorators/fn';
 import { WEBSOCKET_METADATA_KEY } from '../decorators/websocket';
 import { Validator } from '../validation/validator';
+import { compileFrame, CompiledFrame, FrameTemplate } from './frame';
+import { RESPONSE_FRAME_KEY } from '../decorators/response-frame';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
@@ -173,6 +175,7 @@ export class VelocityApplication {
   private wsGateways = new Map<string, any>();
   private compressionEnabled = false;
   private compressionThreshold = 1024;
+  private globalFrame: CompiledFrame | null = null;
 
   constructor(config?: Partial<ApplicationConfig>) {
     this.container = new Container();
@@ -636,6 +639,13 @@ export class VelocityApplication {
   public onResponse(hook: OnResponseHook): this { this._onResponse.push(hook); return this; }
   public onError(hook: OnErrorHook): this { this._onError.push(hook); return this; }
 
+  // ─── Response framing ───
+
+  public responseFrame(template: FrameTemplate): this {
+    this.globalFrame = compileFrame(template);
+    return this;
+  }
+
   // ─── WebSocket registration ───
 
   public registerWebSocket(gatewayClass: any): this {
@@ -974,14 +984,35 @@ export class VelocityApplication {
     // @Status decorator: override default 200
     const defaultStatus = route.statusCode || 0; // 0 = use framework default (200/204)
 
-    // Send response helper — applies @Status if set
+    // ResponseFrame: controller-level overrides global
+    const ctrlFrame = Reflect.getMetadata(RESPONSE_FRAME_KEY, controller.constructor);
+    const frame: CompiledFrame | null = ctrlFrame ? compileFrame(ctrlFrame) : this.globalFrame;
+
+    // Send response helper — applies @Status and ResponseFrame
     const sendResult = (res: VelocityResponse, result: unknown) => {
       if (res.headersSent) return;
-      if (result !== undefined) {
+      const status = defaultStatus || (result !== undefined ? 200 : 204);
+      if (frame && result !== undefined) {
+        res.statusCode = status;
+        res.json(frame.success(status, result));
+      } else if (result !== undefined) {
         if (defaultStatus) res.statusCode = defaultStatus;
         res.json(result);
       } else {
-        res.status(defaultStatus || 204).send('');
+        res.status(status).send('');
+      }
+    };
+
+    // Error handler helper — applies ResponseFrame error path
+    const sendError = (res: VelocityResponse, error: unknown) => {
+      logger.error('Request handling error:', error);
+      if (res.headersSent) return;
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      if (frame) {
+        res.statusCode = 500;
+        res.json(frame.error(500, msg));
+      } else {
+        res.status(500).json({ error: 'Internal Server Error', message: msg });
       }
     };
 
@@ -992,13 +1023,7 @@ export class VelocityApplication {
           const result = await callHandler(req, res);
           sendResult(res, result);
         } catch (error) {
-          logger.error('Request handling error:', error);
-          if (!res.headersSent) {
-            res.status(500).json({
-              error: 'Internal Server Error',
-              message: error instanceof Error ? error.message : 'Unknown error',
-            });
-          }
+          sendError(res, error);
         }
       };
     }
@@ -1011,7 +1036,14 @@ export class VelocityApplication {
         if (validationSchema && req.body !== undefined) {
           const { error, value } = Validator.validate(validationSchema, req.body);
           if (error) {
-            if (!res.headersSent) res.status(400).json({ error: 'Validation failed', message: error });
+            if (!res.headersSent) {
+              if (frame) {
+                res.statusCode = 400;
+                res.json(frame.error(400, error));
+              } else {
+                res.status(400).json({ error: 'Validation failed', message: error });
+              }
+            }
             return;
           }
           req.body = value; // apply Joi coercion
@@ -1021,7 +1053,14 @@ export class VelocityApplication {
           for (const guard of guards) {
             const allowed = await guard(req);
             if (!allowed) {
-              if (!res.headersSent) res.status(403).json({ error: 'Forbidden' });
+              if (!res.headersSent) {
+                if (frame) {
+                  res.statusCode = 403;
+                  res.json(frame.error(403, 'Forbidden'));
+                } else {
+                  res.status(403).json({ error: 'Forbidden' });
+                }
+              }
               return;
             }
           }
@@ -1043,13 +1082,7 @@ export class VelocityApplication {
         }
         sendResult(res, finalResult);
       } catch (error) {
-        logger.error('Request handling error:', error);
-        if (!res.headersSent) {
-          res.status(500).json({
-            error: 'Internal Server Error',
-            message: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
+        sendError(res, error);
       }
     };
   }
