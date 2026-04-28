@@ -1117,16 +1117,21 @@ export class VelocityApplication {
       }
     };
 
-    // Error handler helper — applies ResponseFrame error path
-    const sendError = (res: VelocityResponse, error: unknown) => {
-      logger.error('Request handling error:', error);
-      if (res.headersSent) return;
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      if (frame) {
-        res.statusCode = 500;
-        res.json(frame.error(500, msg));
+    // Error handler — applies onError hooks, or ResponseFrame error path, or default 500
+    const onErrorHooks = this._onError;
+    const handleError = async (req: VelocityRequest, res: VelocityResponse, error: unknown) => {
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (onErrorHooks.length > 0) {
+        for (const hook of onErrorHooks) await hook(err, req, res);
       } else {
-        res.status(500).json({ error: 'Internal Server Error', message: msg });
+        logger.error('Request handling error:', error);
+        if (res.headersSent) return;
+        if (frame) {
+          res.statusCode = 500;
+          res.json(frame.error(500, err.message));
+        } else {
+          res.status(500).json({ error: 'Internal Server Error', message: err.message });
+        }
       }
     };
 
@@ -1137,7 +1142,7 @@ export class VelocityApplication {
           const result = await callHandler(req, res);
           sendResult(res, result);
         } catch (error) {
-          sendError(res, error);
+          await handleError(req, res, error);
         }
       };
     }
@@ -1196,7 +1201,7 @@ export class VelocityApplication {
         }
         sendResult(res, finalResult);
       } catch (error) {
-        sendError(res, error);
+        await handleError(req, res, error);
       }
     };
   }
