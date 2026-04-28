@@ -16,7 +16,9 @@ import {
 } from '../types';
 import { GO_METADATA_KEY, GoMethodDef } from '../decorators/go';
 import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decorators/fn';
-import { WEBSOCKET_METADATA_KEY } from '../decorators/websocket';
+import { WEBSOCKET_METADATA_KEY, WS_COMMANDS_KEY, WS_COMMAND_ELSE_KEY } from '../decorators/websocket';
+import type { WsCommandDef } from '../decorators/websocket';
+import type { WsResponse } from '../types';
 import { Validator } from '../validation/validator';
 import { compileFrame, CompiledFrame, FrameTemplate } from './frame';
 import { RESPONSE_FRAME_KEY } from '../decorators/response-frame';
@@ -132,6 +134,16 @@ interface PendingRegistration {
 
 type CompiledRouteHandler = (req: VelocityRequest, res: VelocityResponse) => Promise<void>;
 
+interface CompiledWsGateway {
+  instance: unknown;
+  /** If the gateway has onMessage — use it directly (approach A). */
+  hasManualHandler: boolean;
+  /** Compiled command dispatch map (approach B). */
+  commands: Map<string, string> | null;
+  /** @CommandElse method name. */
+  commandElse: string | null;
+}
+
 interface TrieNode {
   children: Map<string, TrieNode>;
   paramChild: { name: string; node: TrieNode } | null;
@@ -172,7 +184,8 @@ export class VelocityApplication {
   private _onRequest: OnRequestHook[] = [];
   private _onResponse: OnResponseHook[] = [];
   private _onError: OnErrorHook[] = [];
-  private wsGateways = new Map<string, any>();
+  private wsGateways = new Map<string, CompiledWsGateway>();
+  private pendingWsGateways: any[] = [];
   private compressionEnabled = false;
   private compressionThreshold = 1024;
   private globalFrame: CompiledFrame | null = null;
@@ -227,14 +240,17 @@ export class VelocityApplication {
     for (const target of targets) {
       const controllerMeta: ControllerMetadata = Reflect.getMetadata(CONTROLLER_METADATA_KEY, target);
       const serviceMeta = Reflect.getMetadata(SERVICE_METADATA_KEY, target);
+      const wsMeta: WebSocketMetadata = Reflect.getMetadata(WEBSOCKET_METADATA_KEY, target);
 
       if (controllerMeta) {
         this.pendingControllers.push({ target, options });
+      } else if (wsMeta) {
+        this.pendingWsGateways.push(target);
       } else if (serviceMeta) {
         this.pendingServices.push({ target, options });
       } else {
         throw new Error(
-          `${target.name || target} is not decorated with @Controller or @Service`
+          `${target.name || target} is not decorated with @Controller, @Service, or @WebSocket`
         );
       }
     }
@@ -396,8 +412,12 @@ export class VelocityApplication {
       this.registerService(target, options);
     }
     this.registerControllersTopological();
+    for (const gwClass of this.pendingWsGateways) {
+      this.registerWebSocket(gwClass);
+    }
     this.pendingServices.length = 0;
     this.pendingControllers.length = 0;
+    this.pendingWsGateways.length = 0;
   }
 
   // Topological sort: parents registered before children; circular nesting detected.
@@ -525,18 +545,94 @@ export class VelocityApplication {
 
       // Wire WebSocket gateways into Bun.serve()
       if (this.wsGateways.size > 0) {
+        const gateways = this.wsGateways;
         bunServeOpts.websocket = {
           open: (ws: any) => {
-            const gw = this.wsGateways.get(ws.data?.__wsPath);
-            if (gw?.onOpen) gw.onOpen(ws);
+            const gw = gateways.get(ws.data?.__wsPath);
+            if (!gw) return;
+            const inst = gw.instance as any;
+            if (inst.onOpen) inst.onOpen(ws);
           },
           message: (ws: any, message: any) => {
-            const gw = this.wsGateways.get(ws.data?.__wsPath);
-            if (gw?.onMessage) gw.onMessage(ws, message);
+            const gw = gateways.get(ws.data?.__wsPath);
+            if (!gw) return;
+            const inst = gw.instance as any;
+
+            // Approach A: manual onMessage handler — pass raw message
+            if (gw.hasManualHandler) {
+              inst.onMessage(ws, message);
+              return;
+            }
+
+            // Approach B: @Command dispatch — parse { cmd, data } JSON
+            if (!gw.commands) return;
+            let parsed: { cmd?: string; data?: unknown };
+            try {
+              const text = typeof message === 'string' ? message : message.toString();
+              parsed = JSON.parse(text);
+            } catch {
+              const resp: WsResponse = { ok: false, cmd: '', data: null, error: 'Invalid JSON' };
+              ws.send(JSON.stringify(resp));
+              return;
+            }
+
+            const cmd = parsed.cmd || '';
+            const cmdData = parsed.data;
+            const methodName = gw.commands.get(cmd);
+
+            if (methodName) {
+              // Check if handler wants ws client (param-name injection)
+              const paramNames = parseHandlerParamNames(inst[methodName]);
+              const wantsWs = paramNames.some(n => {
+                const clean = n.replace(/^_+/, '');
+                return clean === 'ws' || clean === 'client' || clean === 'socket';
+              });
+
+              try {
+                const result = wantsWs
+                  ? inst[methodName](cmdData, ws)
+                  : inst[methodName](cmdData);
+
+                // If handler returns a value and didn't use ws directly, send structured response
+                Promise.resolve(result).then((val: unknown) => {
+                  if (!wantsWs && val !== undefined) {
+                    const resp: WsResponse = { ok: true, cmd, data: val, error: null };
+                    ws.send(JSON.stringify(resp));
+                  }
+                }).catch((err: Error) => {
+                  const resp: WsResponse = { ok: false, cmd, data: null, error: err.message };
+                  ws.send(JSON.stringify(resp));
+                });
+              } catch (err: any) {
+                const resp: WsResponse = { ok: false, cmd, data: null, error: err.message };
+                ws.send(JSON.stringify(resp));
+              }
+            } else if (gw.commandElse) {
+              try {
+                const result = inst[gw.commandElse](cmd, cmdData, ws);
+                Promise.resolve(result).then((val: unknown) => {
+                  if (val !== undefined) {
+                    const resp: WsResponse = { ok: true, cmd, data: val, error: null };
+                    ws.send(JSON.stringify(resp));
+                  }
+                }).catch((err: Error) => {
+                  const resp: WsResponse = { ok: false, cmd, data: null, error: err.message };
+                  ws.send(JSON.stringify(resp));
+                });
+              } catch (err: any) {
+                const resp: WsResponse = { ok: false, cmd, data: null, error: err.message };
+                ws.send(JSON.stringify(resp));
+              }
+            } else {
+              const resp: WsResponse = { ok: false, cmd, data: null, error: `Unknown command: ${cmd}` };
+              ws.send(JSON.stringify(resp));
+            }
           },
           close: (ws: any, code: number, reason: string) => {
-            const gw = this.wsGateways.get(ws.data?.__wsPath);
-            if (gw?.onClose) gw.onClose(ws, code, reason);
+            const gw = gateways.get(ws.data?.__wsPath);
+            if (!gw) return;
+            const inst = gw.instance as any;
+            if (inst.onClose) inst.onClose(ws, code, reason);
           },
         };
       }
@@ -651,9 +747,27 @@ export class VelocityApplication {
   public registerWebSocket(gatewayClass: any): this {
     const meta: WebSocketMetadata = Reflect.getMetadata(WEBSOCKET_METADATA_KEY, gatewayClass);
     if (!meta) throw new Error(`${gatewayClass.name} is not decorated with @WebSocket`);
-    const instance = this.container.resolve(gatewayClass);
-    this.wsGateways.set(meta.path, instance);
-    this.logger.info(`Registered WebSocket gateway: ${gatewayClass.name} at ${meta.path}`);
+    const instance: any = this.container.resolve(gatewayClass);
+
+    const hasManualHandler = typeof instance.onMessage === 'function';
+
+    // Compile @Command map (approach B) — only used if no onMessage
+    let commands: Map<string, string> | null = null;
+    let commandElse: string | null = null;
+
+    if (!hasManualHandler) {
+      const defs: WsCommandDef[] = Reflect.getMetadata(WS_COMMANDS_KEY, gatewayClass) || [];
+      if (defs.length > 0) {
+        commands = new Map();
+        for (const def of defs) commands.set(def.name, def.method);
+      }
+      const elseFn: string | undefined = Reflect.getMetadata(WS_COMMAND_ELSE_KEY, gatewayClass);
+      if (elseFn) commandElse = elseFn;
+    }
+
+    this.wsGateways.set(meta.path, { instance, hasManualHandler, commands, commandElse });
+    this.logger.info(`Registered WebSocket gateway: ${gatewayClass.name} at ${meta.path}` +
+      (commands ? ` (${commands.size} commands)` : hasManualHandler ? ' (manual onMessage)' : ''));
     return this;
   }
 

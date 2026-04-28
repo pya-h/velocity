@@ -63,9 +63,9 @@ import './src/controllers/post.controller';
 import './src/controllers/job.controller';
 import './src/controllers/upload.controller';
 
-// WebSocket gateway
-import { EchoGateway } from './src/gateways/echo.gateway';
-velo.registerWebSocket(EchoGateway);
+// WebSocket gateways self-register on velo when imported
+import './src/gateways/echo.gateway';
+import './src/gateways/chat.gateway';
 
 // ── Lifecycle hooks ─────────────────────────────────────────────────────────
 

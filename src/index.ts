@@ -19,7 +19,7 @@ export { Status } from './decorators/status';
 export { ResponseFrame } from './decorators/response-frame';
 export { Frame } from './core/frame';
 export type { FrameTemplate, CompiledFrame } from './core/frame';
-export { WebSocket } from './decorators/websocket';
+export { WebSocket, Command, CommandElse } from './decorators/websocket';
 export { VelocityChannel } from './channel/channel';
 
 // ORM exports

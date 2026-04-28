@@ -159,6 +159,13 @@ export interface WebSocketMetadata {
   target: unknown;
 }
 
+export interface WsResponse {
+  ok: boolean;
+  cmd: string;
+  data: unknown;
+  error: string | null;
+}
+
 // ─── Status codes ────────────────────────────────────────────────────────────
 
 export const StatusCode = {
