@@ -954,7 +954,7 @@ export class VelocityApplication {
     const parseBody = (isBodyMethod && handlerUsesBody) ? this.parseBody.bind(this) : null;
 
     // Validation: from @Validate schema on route, or DTO class with static `schema`
-    let validationSchema = route.schema || null;
+    let validationSchema: any = route.schema || null;
     if (!validationSchema) {
       const bodyIdx = injections.indexOf('body');
       if (bodyIdx !== -1) {
@@ -971,15 +971,26 @@ export class VelocityApplication {
           controller[method](...argBuilders.map(fn => fn(req, res)))
       : () => controller[method]();
 
+    // @Status decorator: override default 200
+    const defaultStatus = route.statusCode || 0; // 0 = use framework default (200/204)
+
+    // Send response helper — applies @Status if set
+    const sendResult = (res: VelocityResponse, result: unknown) => {
+      if (res.headersSent) return;
+      if (result !== undefined) {
+        if (defaultStatus) res.statusCode = defaultStatus;
+        res.json(result);
+      } else {
+        res.status(defaultStatus || 204).send('');
+      }
+    };
+
     // Fast path: no body, no guards, no middleware, no interceptors, no validation
     if (!guards && !middlewares && !interceptors && !parseBody && !validationSchema) {
       return async (req, res) => {
         try {
           const result = await callHandler(req, res);
-          if (!res.headersSent) {
-            if (result !== undefined) res.json(result);
-            else res.status(204).send('');
-          }
+          sendResult(res, result);
         } catch (error) {
           logger.error('Request handling error:', error);
           if (!res.headersSent) {
@@ -1030,10 +1041,7 @@ export class VelocityApplication {
         if (interceptors) {
           for (const ic of interceptors) finalResult = await ic(finalResult, req, res);
         }
-        if (!res.headersSent) {
-          if (finalResult !== undefined) res.json(finalResult);
-          else res.status(204).send('');
-        }
+        sendResult(res, finalResult);
       } catch (error) {
         logger.error('Request handling error:', error);
         if (!res.headersSent) {

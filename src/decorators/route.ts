@@ -6,6 +6,7 @@ const PENDING_INTERCEPTORS_KEY = Symbol.for('pending_interceptors');
 const PENDING_GUARDS_KEY = Symbol.for('pending_guards');
 const PENDING_UPLOAD_KEY = Symbol.for('pending_upload');
 const PENDING_SCHEMA_KEY = Symbol.for('pending_schema');
+const PENDING_STATUS_KEY = Symbol.for('pending_status');
 
 function createRouteDecorator(method: string) {
   return function (path: string = '') {
@@ -61,6 +62,15 @@ function createRouteDecorator(method: string) {
         route.schema = pendingSchema.get(propertyKey);
         pendingSchema.delete(propertyKey);
         Reflect.defineMetadata(PENDING_SCHEMA_KEY, pendingSchema, target.constructor);
+      }
+
+      // Merge any pending status code stored by @Status that ran before us
+      const pendingStatus: Map<string, number> =
+        Reflect.getMetadata(PENDING_STATUS_KEY, target.constructor) || new Map();
+      if (pendingStatus.has(propertyKey)) {
+        route.statusCode = pendingStatus.get(propertyKey);
+        pendingStatus.delete(propertyKey);
+        Reflect.defineMetadata(PENDING_STATUS_KEY, pendingStatus, target.constructor);
       }
 
       routes.push(route);

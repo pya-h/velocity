@@ -15,6 +15,7 @@ export { Channel } from './decorators/channel';
 export { Fn } from './decorators/fn';
 export { Guards } from './decorators/guard';
 export { Upload } from './decorators/upload';
+export { Status } from './decorators/status';
 export { WebSocket } from './decorators/websocket';
 export { VelocityChannel } from './channel/channel';
 

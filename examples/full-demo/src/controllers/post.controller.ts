@@ -2,6 +2,7 @@ import {
   Controller, Get, Post as HttpPost, Delete,
   Guards, Interceptors,
   Validate, Validator,
+  Status, StatusCode,
 } from "@velocity/framework";
 import type { VelocityRequest, VelocityResponse, GuardFunction } from "@velocity/framework";
 import { pgDb } from "../../pgDb";
@@ -10,9 +11,19 @@ import * as Joi from "joi";
 
 const authGuard: GuardFunction = (req) => !!req.headers["authorization"];
 
-const timingInterceptor = (data: any, req: VelocityRequest, _res: VelocityResponse) => {
+interface CreatePostBody {
+  title: string;
+  content: string;
+  author: string;
+}
+
+interface PostParams {
+  id: string;
+}
+
+const timingInterceptor = (data: unknown, req: VelocityRequest): unknown => {
   return {
-    ...data,
+    ...(data as Record<string, unknown>),
     _timing: { servedAt: new Date().toISOString(), path: req.url },
   };
 };
@@ -25,49 +36,50 @@ const createPostSchema = Validator.createSchema({
 
 @Controller("/posts")
 class PostController {
-  // ── Injection style: no params at all — just return ───────────────────────
+  // ── No params, return directly ────────────────────────────────────────────
   @Get("/")
   @Interceptors(timingInterceptor)
-  async list() {
+  async list(): Promise<{ posts: unknown[] }> {
     const posts = await pgDb.Post.findAll();
     return { posts };
   }
 
-  // ── Injection style: `param` only ─────────────────────────────────────────
+  // ── Typed param ───────────────────────────────────────────────────────────
   @Get("/:id")
-  async getById(param: Record<string, string>, res: VelocityResponse) {
+  async getById(param: PostParams, res: VelocityResponse): Promise<{ post: unknown } | void> {
     const id = parseInt(param.id);
-    if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+    if (isNaN(id)) return res.status(StatusCode.BadRequest).json({ error: "Invalid ID" });
 
     const post = await pgDb.Post.findById(id);
-    if (!post) return res.status(404).json({ error: "Post not found" });
+    if (!post) return res.status(StatusCode.NotFound).json({ error: "Post not found" });
     return { post };
   }
 
-  // ── Injection style: `body` + `res` ───────────────────────────────────────
+  // ── @Status(201) + typed body ─────────────────────────────────────────────
   @HttpPost("/")
   @Guards(authGuard)
   @Validate(createPostSchema)
-  async create(body: any, res: VelocityResponse) {
+  @Status(StatusCode.Created)
+  async create(body: CreatePostBody): Promise<{ post: unknown }> {
     const post = await pgDb.Post.create({
       ...body,
       createdAt: new Date().toISOString(),
     });
-    return res.status(201).json({ post });
+    return { post };
   }
 
-  // ── Injection style: `param` + `res` ──────────────────────────────────────
+  // ── Typed param + res ─────────────────────────────────────────────────────
   @Delete("/:id")
   @Guards(authGuard)
-  async remove(param: Record<string, string>, res: VelocityResponse) {
+  async remove(param: PostParams, res: VelocityResponse): Promise<void> {
     const id = parseInt(param.id);
-    if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+    if (isNaN(id)) { res.status(StatusCode.BadRequest).json({ error: "Invalid ID" }); return; }
 
     const post = await pgDb.Post.findById(id);
-    if (!post) return res.status(404).json({ error: "Post not found" });
+    if (!post) { res.status(StatusCode.NotFound).json({ error: "Post not found" }); return; }
 
     await pgDb.Post.delete(id);
-    return res.status(204).send("");
+    res.status(StatusCode.NoContent).send("");
   }
 }
 

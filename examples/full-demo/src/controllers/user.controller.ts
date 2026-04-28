@@ -3,6 +3,7 @@ import {
   Guards, Interceptors,
   Validate, Validator,
   TransformInterceptor,
+  Status, StatusCode,
   Fn,
 } from '@velocity/framework';
 import type { VelocityRequest, VelocityResponse, GuardFunction } from '@velocity/framework';
@@ -12,6 +13,18 @@ import * as Joi from 'joi';
 
 const authGuard: GuardFunction = (req) => !!req.headers['authorization'];
 
+// ── Typed DTOs ──────────────────────────────────────────────────────────────
+
+interface CreateUserBody {
+  name: string;
+  email: string;
+  age?: number;
+}
+
+interface UserParams {
+  id: string;
+}
+
 const createUserSchema = Validator.createSchema({
   name: Joi.string().required(),
   email: Joi.string().email().required(),
@@ -20,73 +33,72 @@ const createUserSchema = Validator.createSchema({
 
 @Controller('/users')
 class UserController {
-  // ── Injection style: just `query` ─────────────────────────────────────────
-  // Only requests what it needs — no req/res boilerplate.
-  // Also sets a cookie via res (listed as second param).
+  // ── @Status(200) + typed query — no res needed ────────────────────────────
   @Get('/')
+  @Status(StatusCode.OK)
   @Interceptors(TransformInterceptor)
-  async list(query: Record<string, string>, res: VelocityResponse) {
+  async list(query: Record<string, string>, res: VelocityResponse): Promise<{ users: unknown[] }> {
     res.setCookie('last-visit', new Date().toISOString(), {
       httpOnly: true, path: '/', maxAge: 86400,
     });
     const users = await db.User.findAll();
-    return { users, query };
+    return { users };
   }
 
-  // ── Injection style: just `param` ─────────────────────────────────────────
+  // ── Typed param — return directly ─────────────────────────────────────────
   @Get('/:id')
-  async getById(param: Record<string, string>, res: VelocityResponse) {
+  async getById(param: UserParams, res: VelocityResponse): Promise<{ user: unknown } | void> {
     const id = parseInt(param.id);
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+    if (isNaN(id)) return res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' });
 
     const user = await db.User.findById(id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(StatusCode.NotFound).json({ error: 'User not found' });
     return { user };
   }
 
-  // ── Injection style: `body` + `res` ───────────────────────────────────────
-  // Body is auto-validated via @Validate schema. Handler receives validated body directly.
+  // ── @Status(201) + typed body — res only for error paths ──────────────────
   @HttpPost('/')
   @Guards(authGuard)
   @Validate(createUserSchema)
-  async create(body: any, res: VelocityResponse) {
+  @Status(StatusCode.Created)
+  async create(body: CreateUserBody): Promise<{ user: unknown }> {
     const user = await db.User.create({
       ...body,
       createdAt: new Date().toISOString()
     });
-    return res.status(201).json({ user });
+    return { user };
   }
 
-  // ── Injection style: classic `req` + `res` (backward compat) ──────────────
+  // ── Classic req + res (backward compat) ───────────────────────────────────
   @Delete('/:id')
   @Guards(authGuard)
-  async remove(req: VelocityRequest, res: VelocityResponse) {
+  async remove(req: VelocityRequest, res: VelocityResponse): Promise<void> {
     const id = parseInt(req.params!.id);
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+    if (isNaN(id)) { res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' }); return; }
 
     const user = await db.User.findById(id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) { res.status(StatusCode.NotFound).json({ error: 'User not found' }); return; }
 
     await db.User.delete(id);
-    return res.status(204).send('');
+    res.status(StatusCode.NoContent).send('');
   }
 
-  // ── HTTP Functions (/. namespace) — no injection, uses @Fn arg parsing ────
+  // ── HTTP Functions (/. namespace) ─────────────────────────────────────────
   @Fn()
-  async findUser(id: number) {
+  async findUser(id: number): Promise<unknown> {
     const user = await db.User.findById(id);
     if (!user) throw new Error(`User ${id} not found`);
     return user;
   }
 
   @Fn()
-  async countUsers() {
+  async countUsers(): Promise<number> {
     const users = await db.User.findAll();
     return users.length;
   }
 
   @Fn()
-  async greet(name: string, formal: boolean) {
+  async greet(name: string, formal: boolean): Promise<{ message: string }> {
     return { message: formal ? `Good day, ${name}.` : `Hey ${name}!` };
   }
 }

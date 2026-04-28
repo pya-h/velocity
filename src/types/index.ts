@@ -1,25 +1,25 @@
 import { IncomingMessage, ServerResponse } from 'http';
 
 export interface VelocityRequest extends IncomingMessage {
-  body?: any;
+  body?: unknown;
   params?: Record<string, string>;
   query?: Record<string, string>;
   headers: Record<string, string | string[] | undefined>;
-  user?: any;
-  session?: any;
+  user?: unknown;
+  session?: unknown;
   cookies?: Record<string, string>;
   files?: Record<string, UploadedFile | UploadedFile[]>;
 }
 
 export interface VelocityResponse extends ServerResponse {
-  json(data: any): void;
+  json(data: unknown): void;
   status(code: number): VelocityResponse;
-  send(data: any): void;
+  send(data: unknown): void;
   setCookie(name: string, value: string, options?: CookieOptions): VelocityResponse;
 }
 
 export interface RouteHandler {
-  (req: VelocityRequest, res: VelocityResponse): Promise<any> | any;
+  (req: VelocityRequest, res: VelocityResponse): Promise<unknown> | unknown;
 }
 
 export interface MiddlewareFunction {
@@ -27,7 +27,7 @@ export interface MiddlewareFunction {
 }
 
 export interface InterceptorFunction {
-  (data: any, req: VelocityRequest, res: VelocityResponse): Promise<any> | any;
+  (data: unknown, req: VelocityRequest, res: VelocityResponse): Promise<unknown> | unknown;
 }
 
 export type GuardFunction = (req: VelocityRequest) => boolean | Promise<boolean>;
@@ -67,7 +67,8 @@ export interface RouteMetadata {
   interceptors?: InterceptorFunction[];
   guards?: GuardFunction[];
   upload?: UploadOptions;
-  schema?: any;
+  schema?: unknown;
+  statusCode?: number;
 }
 
 export interface ControllerMetadata {
@@ -150,10 +151,45 @@ export interface ColumnMetadata {
 export interface VelocitySocket {
   send(data: string | ArrayBuffer | Uint8Array): void;
   close(code?: number, reason?: string): void;
-  data: any;
+  data: unknown;
 }
 
 export interface WebSocketMetadata {
   path: string;
-  target: any;
+  target: unknown;
 }
+
+// ─── Status codes ────────────────────────────────────────────────────────────
+
+export const StatusCode = {
+  // 2xx Success
+  OK: 200,
+  Created: 201,
+  Accepted: 202,
+  NoContent: 204,
+
+  // 3xx Redirection
+  MovedPermanently: 301,
+  Found: 302,
+  NotModified: 304,
+  TemporaryRedirect: 307,
+  PermanentRedirect: 308,
+
+  // 4xx Client Error
+  BadRequest: 400,
+  Unauthorized: 401,
+  Forbidden: 403,
+  NotFound: 404,
+  MethodNotAllowed: 405,
+  Conflict: 409,
+  Gone: 410,
+  UnprocessableEntity: 422,
+  TooManyRequests: 429,
+
+  // 5xx Server Error
+  InternalServerError: 500,
+  NotImplemented: 501,
+  BadGateway: 502,
+  ServiceUnavailable: 503,
+  GatewayTimeout: 504,
+} as const;

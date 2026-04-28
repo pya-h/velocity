@@ -174,8 +174,8 @@ class InterceptorTests {
 
   @Test('multiple interceptors chain in declaration order')
   async chainInterceptors() {
-    const double = (data: number) => data * 2;
-    const addOne = (data: number) => data + 1;
+    const double = (data: unknown) => (data as number) * 2;
+    const addOne = (data: unknown) => (data as number) + 1;
 
     @Controller('/chained')
     class ChainedCtrl {
