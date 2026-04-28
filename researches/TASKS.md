@@ -454,11 +454,11 @@ Argument parsing is safe — no `eval`; state-machine parser with a 2000-char de
 ### T-SE-08: Eden-like typed client generation (Elysia-inspired) — DONE
 **Area:** DX / frontend integration
 Static analysis code generator (`scripts/velogen-client.js`) scans `@Controller` + route
-decorators, emits `velocity-client.ts` — a typed fetch wrapper grouped by controller namespace.
+decorators, emits `velient.ts` — a typed fetch wrapper grouped by controller namespace.
 Each route becomes a function with the correct path params, body arg, and options.
 Accessible via `velogen c <dir>` or `velogen client <dir>`. Supports `--base-url=` flag.
 ```typescript
-// Generated: velocity-client.ts
+// Generated: velient.ts
 export const user = {
   list:    (opts?) => _fetch('GET', '/users/', undefined, opts),
   getById: (id: string, opts?) => _fetch('GET', `/users/${id}`, undefined, opts),

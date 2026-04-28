@@ -6,7 +6,7 @@
  *   - REST endpoints grouped by controller namespace
  *   - .fn namespace for @Fn HTTP function calls
  *   - .ws namespace for @WebSocket + @Command gateways
- *   - Client(baseUrl) factory for custom base URLs
+ *   - Velient(baseUrl) factory for custom base URLs
  *   - Individual exports for default base URL
  *
  * Usage:
@@ -199,7 +199,7 @@ if (wsGateways.length > 0) {
 
 // ── Client factory ──
 
-o += `function _buildClient(base: string) {\n`;
+o += `function _buildVelient(base: string) {\n`;
 o += `  const _fetch = _createFetch(base);\n`;
 if (wsGateways.length > 0) {
   o += `  const wsBase = base.replace(/^http/, 'ws');\n`;
@@ -270,7 +270,7 @@ o += `}\n\n`;
 // ── Default instance + individual exports ──
 
 o += `// Default client (base: ${defaultBaseUrl})\n`;
-o += `const _default = _buildClient(DEFAULT_BASE);\n\n`;
+o += `const _default = _buildVelient(DEFAULT_BASE);\n\n`;
 
 for (const ctrl of controllers) {
   const nsName = ctrl.className.replace(/Controller$/, '').toLowerCase();
@@ -281,15 +281,15 @@ if (wsGateways.length > 0) o += `export const ws = _default.ws;\n`;
 
 o += `\n`;
 o += `/** Create a client with a custom base URL. */\n`;
-o += `export function Client(baseUrl: string = DEFAULT_BASE) {\n`;
-o += `  return _buildClient(baseUrl);\n`;
+o += `export function Velient(baseUrl: string = DEFAULT_BASE) {\n`;
+o += `  return _buildVelient(baseUrl);\n`;
 o += `}\n`;
 
 // ── Write ──
 
 const outputDir = path.join(projectDir, 'velo');
 fs.mkdirSync(outputDir, { recursive: true });
-const outputFile = path.join(outputDir, 'velocity-client.ts');
+const outputFile = path.join(outputDir, 'velient.ts');
 fs.writeFileSync(outputFile, o);
 
 const routeCount = controllers.reduce((sum, c) => sum + c.routes.length, 0);

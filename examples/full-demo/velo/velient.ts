@@ -43,7 +43,7 @@ function _createWs(wsBase: string, path: string) {
   };
 }
 
-function _buildClient(base: string) {
+function _buildVelient(base: string) {
   const _fetch = _createFetch(base);
   const wsBase = base.replace(/^http/, 'ws');
   return {
@@ -109,7 +109,7 @@ function _buildClient(base: string) {
 }
 
 // Default client (base: http://localhost:5000)
-const _default = _buildClient(DEFAULT_BASE);
+const _default = _buildVelient(DEFAULT_BASE);
 
 export const health = _default.health;
 export const job = _default.job;
@@ -119,6 +119,6 @@ export const fn = _default.fn;
 export const ws = _default.ws;
 
 /** Create a client with a custom base URL. */
-export function Client(baseUrl: string = DEFAULT_BASE) {
-  return _buildClient(baseUrl);
+export function Velient(baseUrl: string = DEFAULT_BASE) {
+  return _buildVelient(baseUrl);
 }

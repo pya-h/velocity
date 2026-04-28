@@ -101,7 +101,7 @@ export const velo = new VelocityApplication({
 
 ```typescript
 import { DB } from '@velocity/framework';
-import type { TypedDb } from './velo/velocity-types';
+import type { TypedDb } from './velo/velotypes';
 
 export const db = DB({
   type: 'sqlite',
@@ -176,7 +176,7 @@ main().catch(console.error);
 
 ### `velogen t` — DB Type Generator
 
-Scans `*.entity.ts` files and generates `velo/velocity-types.d.ts` with typed interfaces.
+Scans `*.entity.ts` files and generates `velo/velotypes.d.ts` with typed interfaces.
 
 ```bash
 npm run velogen -- t examples/full-demo
@@ -216,7 +216,7 @@ npm run velogen -- oa examples/full-demo
 
 ### `velogen c` — Typed Client Generator
 
-Generates `velo/velocity-client.ts` — a typed fetch wrapper grouped by controller namespace.
+Generates `velo/velient.ts` — a typed fetch wrapper grouped by controller namespace.
 Each route becomes a function with the correct path params, body arg, and request options.
 
 ```bash
@@ -225,7 +225,7 @@ npm run velogen -- c examples/full-demo --base-url=http://api.example.com
 ```
 
 ```typescript
-import { user } from './velo/velocity-client';
+import { user } from './velo/velient';
 
 const users = await user.list();
 const u = await user.getById('123');
