@@ -7,12 +7,11 @@ import {
   ResponseFrame, Frame,
   Fn,
 } from '@velocity/framework';
-import type { VelocityRequest, VelocityResponse, GuardFunction } from '@velocity/framework';
+import type { VelocityRequest, VelocityResponse } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
+import { authGuard, type SessionUser } from '../guards/auth.guard';
 import * as Joi from 'joi';
-
-const authGuard: GuardFunction = (req) => !!req.headers['authorization'];
 
 // ── Typed DTOs ──────────────────────────────────────────────────────────────
 
@@ -45,7 +44,7 @@ const createUserSchema = Validator.createSchema({
 })
 @Controller('/users')
 class UserController {
-  // ── @Status(200) + typed query — no res needed ────────────────────────────
+  // ── Public: list all users ─────────────────────────────────────────────────
   @Get('/')
   @Status(StatusCode.OK)
   @Interceptors(TransformInterceptor)
@@ -57,7 +56,7 @@ class UserController {
     return { users };
   }
 
-  // ── Typed param — return directly ─────────────────────────────────────────
+  // ── Public: get single user ────────────────────────────────────────────────
   @Get('/:id')
   async getById(param: UserParams, res: VelocityResponse): Promise<{ user: unknown } | void> {
     const id = parseInt(param.id);
@@ -68,36 +67,35 @@ class UserController {
     return { user };
   }
 
-  // ── @Status(201) + typed body — res only for error paths ──────────────────
+  // ── Protected: create user (cookie auth + validation) ──────────────────────
+  //    `user` param is the authenticated SessionUser from the cookie guard.
   @HttpPost('/')
   @Guards(authGuard)
   @Validate(createUserSchema)
   @Status(StatusCode.Created)
-  async create(body: CreateUserBody): Promise<{ user: unknown; message: string }> {
-    const user = await db.User.create({
+  async create(body: CreateUserBody, user: SessionUser): Promise<{ user: unknown; message: string }> {
+    const created = await db.User.create({
       ...body,
       createdAt: new Date().toISOString()
     });
-    // 'message' gets extracted by Frame.Extract('message') into the top-level frame field.
-    // The remaining { user } becomes Frame.Data.
-    return { user, message: 'User created successfully' };
+    return { user: created, message: `User created by ${user.username}` };
   }
 
-  // ── Classic req + res (backward compat) ───────────────────────────────────
+  // ── Protected: delete user (cookie auth, classic req+res style) ────────────
   @Delete('/:id')
   @Guards(authGuard)
   async remove(req: VelocityRequest, res: VelocityResponse): Promise<void> {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) { res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' }); return; }
 
-    const user = await db.User.findById(id);
-    if (!user) { res.status(StatusCode.NotFound).json({ error: 'User not found' }); return; }
+    const found = await db.User.findById(id);
+    if (!found) { res.status(StatusCode.NotFound).json({ error: 'User not found' }); return; }
 
     await db.User.delete(id);
     res.status(StatusCode.NoContent).send('');
   }
 
-  // ── HTTP Functions (/. namespace) ─────────────────────────────────────────
+  // ── HTTP Functions (public — @Fn bypasses ResponseFrame) ───────────────────
   @Fn()
   async findUser(id: number): Promise<unknown> {
     const user = await db.User.findById(id);

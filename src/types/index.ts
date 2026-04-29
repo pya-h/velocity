@@ -1,4 +1,5 @@
 import { IncomingMessage, ServerResponse } from 'http';
+import type { VelocitySession } from '../core/session';
 
 export interface VelocityRequest extends IncomingMessage {
   body?: unknown;
@@ -6,7 +7,7 @@ export interface VelocityRequest extends IncomingMessage {
   query?: Record<string, string>;
   headers: Record<string, string | string[] | undefined>;
   user?: unknown;
-  session?: unknown;
+  session?: VelocitySession;
   cookies?: Record<string, string>;
   /** Signed cookies — value is the verified plaintext, or `false` if signature invalid. */
   signedCookies?: Record<string, string | false>;
@@ -136,6 +137,15 @@ export interface ApplicationConfig {
     enabled?: boolean;
     /** Minimum response size in bytes to compress. Default: 1024 */
     threshold?: number;
+  };
+  /** Encrypted cookie session. If not set, session features are disabled (zero overhead). */
+  session?: {
+    /** Secret key for AES-256-GCM encryption + HMAC-SHA256 signing. */
+    secret: string;
+    /** Cookie name. Default: 'velocity.sid' */
+    cookieName?: string;
+    /** Max age in seconds. Default: 3600 (1 hour) */
+    maxAge?: number;
   };
 }
 

@@ -82,17 +82,17 @@ class AuthE2ETests {
     expect(status).toBe(400);
   }
 
-  @Test('GET /api/auth/me without cookie returns 401')
+  @Test('GET /api/auth/me without cookie returns 403')
   async meWithoutCookie() {
     const { status } = await TestUtils.makeRequest(this.app, {
       method: 'GET', path: '/api/auth/me',
     });
-    expect(status).toBe(401);
+    expect(status).toBe(403);
   }
 
-  @Test('full login → me → logout flow with signed cookies')
+  @Test('full login → me → logout flow with encrypted session')
   async fullAuthFlow() {
-    // 1. Login — server sets signed session cookie
+    // 1. Login — server sets encrypted session cookie (velocity.sid)
     const loginRes = await TestUtils.makeRequest(this.app, {
       method: 'POST', path: '/api/auth/login',
       body: { username: 'user', password: 'user1234' },
@@ -100,14 +100,14 @@ class AuthE2ETests {
     expect(loginRes.status).toBe(200);
 
     const setCookie = loginRes.headers['set-cookie'] as string;
-    expect(setCookie).toContain('session=');
+    expect(setCookie).toContain('velocity.sid=');
     expect(setCookie).toContain('HttpOnly');
 
     // Extract session cookie to pass in subsequent requests
-    const match = setCookie.match(/session=([^;]+)/);
-    const sessionCookie = `session=${match![1]}`;
+    const match = setCookie.match(/velocity\.sid=([^;]+)/);
+    const sessionCookie = `velocity.sid=${match![1]}`;
 
-    // 2. GET /me with signed cookie — should return current user
+    // 2. GET /me with encrypted cookie — should return current user
     const meRes = await TestUtils.makeRequest(this.app, {
       method: 'GET', path: '/api/auth/me',
       headers: { cookie: sessionCookie },
@@ -125,13 +125,13 @@ class AuthE2ETests {
     expect(logoutRes.headers['set-cookie']).toContain('Max-Age=0');
   }
 
-  @Test('tampered cookie is rejected')
+  @Test('tampered session cookie is rejected')
   async tamperedCookie() {
     const { status } = await TestUtils.makeRequest(this.app, {
       method: 'GET', path: '/api/auth/me',
-      headers: { cookie: 'session=admin%3Aadmin.tampered-sig' },
+      headers: { cookie: 'velocity.sid=tampered-garbage.fake' },
     });
-    expect(status).toBe(401);
+    expect(status).toBe(403);
   }
 }
 
@@ -155,10 +155,18 @@ class UserGuardTests {
 
   @Test('POST /api/users with auth but invalid body returns 400')
   async createInvalidBody() {
+    // Login first to get an encrypted session cookie
+    const loginRes = await TestUtils.makeRequest(this.app, {
+      method: 'POST', path: '/api/auth/login',
+      body: { username: 'admin', password: 'admin123' },
+    });
+    const match = (loginRes.headers['set-cookie'] as string).match(/velocity\.sid=([^;]+)/);
+    const cookie = `velocity.sid=${match![1]}`;
+
     const { status } = await TestUtils.makeRequest(this.app, {
       method: 'POST', path: '/api/users',
       body: { name: 'Test' }, // missing required email
-      headers: { authorization: 'Bearer demo' },
+      headers: { cookie },
     });
     expect(status).toBe(400);
   }

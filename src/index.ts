@@ -18,6 +18,8 @@ export { Upload } from './decorators/upload';
 export { Status } from './decorators/status';
 export { ResponseFrame } from './decorators/response-frame';
 export { Frame } from './core/frame';
+export { VelocitySession } from './core/session';
+export type { SessionConfig } from './core/session';
 export type { FrameTemplate, CompiledFrame } from './core/frame';
 export { WebSocket, Command, CommandElse } from './decorators/websocket';
 export { VelocityChannel } from './channel/channel';

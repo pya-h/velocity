@@ -15,14 +15,14 @@
  *   curl localhost:5000/api/users
  *   curl -X POST localhost:5000/api/users \
  *        -H "Content-Type: application/json" \
- *        -H "Authorization: Bearer demo" \
+ *        -b cookies.txt \
  *        -d '{"name":"Alice","email":"alice@example.com","age":28}'
  *
  *   curl localhost:5000/api/posts
  *   curl -X POST localhost:5000/api/posts \
  *        -H "Content-Type: application/json" \
- *        -H "Authorization: Bearer demo" \
- *        -d '{"title":"Hello","content":"World","author":"Alice"}'
+ *        -b cookies.txt \
+ *        -d '{"title":"Hello","content":"World"}'
  *
  *   # Submit jobs (status persisted to PostgreSQL via connection pool)
  *   curl -X POST localhost:5000/api/jobs \

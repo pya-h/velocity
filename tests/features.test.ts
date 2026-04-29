@@ -544,3 +544,154 @@ describe('E2E — @Validate with guards + injection', () => {
     bunExpect(r3.body.name).toBe('Alice');
   });
 });
+
+// ─── VelocitySession (encrypted cookie session) ─────────────────────────────
+
+import { VelocitySession } from '../src/core/session';
+
+@Suite('VelocitySession')
+class SessionTests {
+  @Test('session.set() encrypts data and sets cookie')
+  async setSession() {
+    const app = TestUtils.createTestApp({ session: { secret: 'test-secret' } });
+
+    @Controller('/ses1')
+    class C {
+      @Post('/')
+      login(session: VelocitySession) {
+        session.set({ userId: 42, role: 'admin' });
+        return { ok: true };
+      }
+    }
+
+    app.register(C);
+    const { status, headers } = await TestUtils.makeRequest(app, {
+      method: 'POST', path: '/ses1', body: {},
+    });
+    expect(status).toBe(200);
+    const cookie = headers['set-cookie'] as string;
+    expect(cookie).toContain('velocity.sid=');
+    expect(cookie).toContain('HttpOnly');
+    // The value should be encrypted — NOT contain plaintext 'userId' or '42'
+    expect(cookie).not.toContain('userId');
+  }
+
+  @Test('session.data decrypts stored session')
+  async readSession() {
+    const app = TestUtils.createTestApp({ session: { secret: 'read-test' } });
+
+    @Controller('/ses2')
+    class C {
+      @Post('/login')
+      login(session: VelocitySession) {
+        session.set({ name: 'Alice', role: 'user' });
+        return { ok: true };
+      }
+      @Get('/me')
+      me(session: VelocitySession) {
+        if (!session.valid) return { error: 'no session' };
+        return session.data;
+      }
+    }
+
+    app.register(C);
+
+    // Login — get encrypted cookie
+    const loginRes = await TestUtils.makeRequest(app, {
+      method: 'POST', path: '/ses2/login', body: {},
+    });
+    const match = (loginRes.headers['set-cookie'] as string).match(/velocity\.sid=([^;]+)/);
+    const cookie = `velocity.sid=${match![1]}`;
+
+    // Read session — decrypt and return data
+    const meRes = await TestUtils.makeRequest(app, {
+      method: 'GET', path: '/ses2/me',
+      headers: { cookie },
+    });
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.name).toBe('Alice');
+    expect(meRes.body.role).toBe('user');
+  }
+
+  @Test('session.destroy() clears cookie')
+  async destroySession() {
+    const app = TestUtils.createTestApp({ session: { secret: 'destroy-test' } });
+
+    @Controller('/ses3')
+    class C {
+      @Post('/logout')
+      logout(session: VelocitySession) {
+        session.destroy();
+        return { ok: true };
+      }
+    }
+
+    app.register(C);
+    const { headers } = await TestUtils.makeRequest(app, {
+      method: 'POST', path: '/ses3/logout', body: {},
+    });
+    const cookie = headers['set-cookie'] as string;
+    expect(cookie).toContain('velocity.sid=');
+    expect(cookie).toContain('Max-Age=0');
+  }
+
+  @Test('tampered session cookie is rejected')
+  async tamperedSession() {
+    const app = TestUtils.createTestApp({ session: { secret: 'tamper-test' } });
+
+    @Controller('/ses4')
+    class C {
+      @Get('/')
+      check(session: VelocitySession) {
+        return { valid: session.valid, data: session.data };
+      }
+    }
+
+    app.register(C);
+    const { body } = await TestUtils.makeRequest(app, {
+      method: 'GET', path: '/ses4',
+      headers: { cookie: 'velocity.sid=tampered-garbage.fake-sig' },
+    });
+    expect(body.valid).toBe(false);
+    expect(body.data).toBeNull();
+  }
+
+  @Test('no session config — req.session is undefined')
+  async noConfig() {
+    const app = TestUtils.createTestApp(); // no session config
+
+    @Controller('/ses5')
+    class C {
+      @Get('/')
+      check(session: unknown) { return { session: session ?? null }; }
+    }
+
+    app.register(C);
+    const { body } = await TestUtils.makeRequest(app, {
+      method: 'GET', path: '/ses5',
+    });
+    expect(body.session).toBeNull();
+  }
+
+  @Test('custom cookie name works')
+  async customName() {
+    const app = TestUtils.createTestApp({
+      session: { secret: 'custom-name', cookieName: 'my.app.session' },
+    });
+
+    @Controller('/ses6')
+    class C {
+      @Post('/')
+      login(session: VelocitySession) {
+        session.set({ ok: true });
+        return { ok: true };
+      }
+    }
+
+    app.register(C);
+    const { headers } = await TestUtils.makeRequest(app, {
+      method: 'POST', path: '/ses6', body: {},
+    });
+    expect(headers['set-cookie']).toContain('my.app.session=');
+  }
+}

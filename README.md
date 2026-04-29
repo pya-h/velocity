@@ -19,6 +19,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **Guards** — `@Guards(fn)` decorator for boolean-return auth checks; runs before middleware
 - **Lifecycle hooks** — `velo.onRequest()`, `velo.onResponse()`, `velo.onError()` global hooks
 - **Cookies** — lazy `req.cookies` parsing, `res.setCookie` with full options, signed cookies (HMAC-SHA256), `res.clearCookie`
+- **Encrypted sessions** — `VelocitySession` with AES-256-GCM encryption + HMAC signing; zero overhead when unused
 - **File uploads** — `@Upload({ maxSize, maxFiles })` with Bun-native multipart; files on `req.files`
 - **WebSocket** — `@WebSocket('/path')` class decorator for Bun-native WebSocket gateways
 - **Response compression** — config-based gzip via `Bun.gzipSync()` for JSON/text responses
@@ -384,6 +385,88 @@ res.setCookie('session', 'abc123', {
   maxAge: 86400,
   path: '/',
 });
+
+// Clear a cookie
+res.clearCookie('session', { path: '/' });
+```
+
+## Encrypted Sessions
+
+Stateless, encrypted, cookie-based sessions. Data is AES-256-GCM encrypted + HMAC-SHA256 signed — the client cannot read or tamper with it. Zero server-side state.
+
+**Zero overhead when unused** — if `session` is not in the config, no crypto code runs. If configured but the handler doesn't use the `session` param, the cookie is never read or decrypted.
+
+### Setup
+
+```typescript
+const velo = new VelocityApplication({
+  port: 5000,
+  session: {
+    secret: 'your-secret-key',    // AES-256-GCM + HMAC-SHA256
+    cookieName: 'velocity.sid',   // default
+    maxAge: 3600,                 // 1 hour (default)
+  },
+});
+```
+
+### Usage
+
+```typescript
+import { VelocitySession } from '@velocity/framework';
+
+interface UserData {
+  userId: number;
+  role: string;
+}
+
+@Post('/login')
+login(body: LoginDto, session: VelocitySession<UserData>, res: VelocityResponse) {
+  const user = authenticate(body); // your logic
+  if (!user) { res.status(401).json({ error: 'Invalid' }); return; }
+
+  session.set({ userId: user.id, role: user.role }); // encrypts + signs + sets cookie
+  return { ok: true };
+}
+
+@Get('/me')
+@Guards(authGuard)
+me(session: VelocitySession<UserData>) {
+  return session.data; // { userId: 1, role: 'admin' } — decrypted lazily
+}
+
+@Post('/logout')
+logout(session: VelocitySession) {
+  session.destroy(); // clears the cookie
+  return { ok: true };
+}
+```
+
+### Session API
+
+| Method/Property | Description |
+|---|---|
+| `session.data` | Decrypted session data (lazy — only decrypts on first access). `null` if invalid. |
+| `session.valid` | `true` if a valid, verified session exists. |
+| `session.set(data)` | Encrypt + sign + set cookie on the response. |
+| `session.destroy()` | Clear the session cookie (Max-Age=0). |
+
+### Auth guard with sessions
+
+```typescript
+import type { GuardFunction } from '@velocity/framework';
+
+export const authGuard: GuardFunction = (req) => {
+  if (!req.session?.valid) return false;
+  req.user = req.session.data; // attach to req.user for handler injection
+  return true;
+};
+
+// In handler — `user` param is injected from req.user:
+@Get('/profile')
+@Guards(authGuard)
+profile(user: { userId: number; role: string }) {
+  return { userId: user.userId };
+}
 ```
 
 ## File Uploads

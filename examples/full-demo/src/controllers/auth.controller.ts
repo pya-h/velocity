@@ -1,10 +1,13 @@
 import {
   Controller, Get, Post,
+  Guards,
   Status, StatusCode,
   Validate, Validator,
+  VelocitySession,
 } from '@velocity/framework';
-import type { VelocityRequest, VelocityResponse } from '@velocity/framework';
+import type { VelocityResponse } from '@velocity/framework';
 import { velo } from '../../velo';
+import { authGuard, type SessionUser } from '../guards/auth.guard';
 import * as Joi from 'joi';
 
 const loginSchema = Validator.createSchema({
@@ -22,68 +25,53 @@ const DEMO_USERS: Record<string, { password: string; role: string }> = {
 class AuthController {
   /**
    * POST /api/auth/login
-   * Sets a signed session cookie on successful login.
+   * Validates credentials, stores user data in an encrypted session cookie.
    *
-   * Demonstrates:
-   *   - Typed body injection (body param)
-   *   - res.setCookie with signed: true
-   *   - @Validate for input validation
-   *   - @Status for explicit status code
+   * The session cookie is AES-256-GCM encrypted + HMAC-SHA256 signed.
+   * The client cannot read or tamper with it.
    */
   @Post('/login')
   @Validate(loginSchema)
   @Status(StatusCode.OK)
-  login(body: { username: string; password: string }, res: VelocityResponse): { message: string; user: string; role: string } | void {
+  login(
+    body: { username: string; password: string },
+    session: VelocitySession<SessionUser>,
+    res: VelocityResponse,
+  ): { message: string; user: string; role: string } | void {
     const entry = DEMO_USERS[body.username];
     if (!entry || entry.password !== body.password) {
       res.status(StatusCode.Unauthorized).json({ error: 'Invalid credentials' });
       return;
     }
 
-    // Set a signed, httpOnly session cookie — value is "username:role"
-    res.setCookie('session', `${body.username}:${entry.role}`, {
-      signed: true,
-      httpOnly: true,
-      path: '/',
-      maxAge: 3600, // 1 hour
-      sameSite: 'Lax',
-    });
+    // Store user data in encrypted session — one call, framework handles everything
+    session.set({ username: body.username, role: entry.role });
 
     return { message: 'Logged in', user: body.username, role: entry.role };
   }
 
   /**
    * POST /api/auth/logout
-   * Clears the session cookie.
-   *
-   * Demonstrates:
-   *   - res.clearCookie
+   * Destroys the session cookie.
    */
   @Post('/logout')
   @Status(StatusCode.OK)
-  logout(_req: VelocityRequest, res: VelocityResponse): { message: string } {
-    res.clearCookie('session', { path: '/' });
+  logout(session: VelocitySession): { message: string } {
+    session.destroy();
     return { message: 'Logged out' };
   }
 
   /**
    * GET /api/auth/me
-   * Returns the current user from the signed session cookie.
+   * Returns the current user from the encrypted session.
    *
-   * Demonstrates:
-   *   - signedCookies injection (reads verified cookie)
-   *   - Cookie-based authentication without Authorization header
+   * The authGuard verifies the session and populates req.user.
+   * The `user` param injects the authenticated SessionUser.
    */
   @Get('/me')
-  me(signedCookies: Record<string, string | false>, res: VelocityResponse): { user: string; role: string } | void {
-    const session = signedCookies?.session;
-    if (!session || session === false) {
-      res.status(StatusCode.Unauthorized).json({ error: 'Not logged in — no valid session cookie' });
-      return;
-    }
-
-    const [user, role] = (session as string).split(':');
-    return { user, role };
+  @Guards(authGuard)
+  me(user: SessionUser): { user: string; role: string } {
+    return { user: user.username, role: user.role };
   }
 }
 

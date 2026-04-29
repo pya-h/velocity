@@ -10,6 +10,10 @@ export const velo = new VelocityApplication({
   host: envelocity.server.hostOrThrow,
   globalPrefix: '/api',
   cookieSecret: envelocity.auth.jwtSecret ?? 'change-me-in-production',
+  session: {
+    secret: envelocity.auth.jwtSecret ?? 'change-me-in-production',
+    maxAge: 3600,
+  },
   logger: {
     level: 'info',
     format: 'combined',

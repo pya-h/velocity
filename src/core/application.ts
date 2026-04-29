@@ -23,6 +23,8 @@ import { compileValidator } from '../validation/validator';
 import type { CompiledValidator, ValidateSchema } from '../validation/validator';
 import { compileFrame, CompiledFrame, FrameTemplate } from './frame';
 import { RESPONSE_FRAME_KEY } from '../decorators/response-frame';
+import { VelocitySession, compileSessionConfig } from './session';
+import type { CompiledSession } from './session';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
 const ROUTES_METADATA_KEY = Symbol.for('routes');
@@ -127,6 +129,7 @@ function _unsignValue(signed: string, secret: string): string | false {
 
 /** Bound to each VelocityResponse — captures `cookieSecret` from app config. */
 let _cookieSecret: string | undefined;
+let _sessionConfig: CompiledSession | null = null;
 
 function _resCookie(this: VelocityResponse, name: string, value: string, options?: CookieOptions) {
   const finalValue = (options?.signed && _cookieSecret) ? _signValue(value, _cookieSecret) : value;
@@ -239,6 +242,7 @@ export class VelocityApplication {
     this.config = new Config(config);
     this.logger = new Logger(this.config.get('logger'));
     _cookieSecret = config?.cookieSecret;
+    _sessionConfig = config?.session ? compileSessionConfig(config.session) : null;
 
     // Only load node:http on Node.js — Bun uses Bun.serve() and never needs it
     this.server = IS_BUN ? null : require('http').createServer((req: IncomingMessage, res: ServerResponse) => this.handleRequest(req, res));
@@ -856,6 +860,19 @@ export class VelocityApplication {
             const raw = _parseCookies(rawCookieHeader);
             const val = _parseSignedCookies(raw, _cookieSecret!);
             Object.defineProperty(this, 'signedCookies', { value: val, writable: true, enumerable: true, configurable: true });
+            return val;
+          },
+          enumerable: true,
+          configurable: true,
+        });
+      }
+      if (_sessionConfig) {
+        const sessCfg = _sessionConfig;
+        Object.defineProperty(velocityReq, 'session', {
+          get() {
+            const raw = _parseCookies(rawCookieHeader);
+            const val = new VelocitySession(raw[sessCfg.cookieName], sessCfg, velocityRes);
+            Object.defineProperty(this, 'session', { value: val, writable: true, enumerable: true, configurable: true });
             return val;
           },
           enumerable: true,
