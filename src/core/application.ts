@@ -19,7 +19,8 @@ import { FN_METADATA_KEY, FnDef, parseFunctionCall, parseFnArgs } from '../decor
 import { WEBSOCKET_METADATA_KEY, WS_COMMANDS_KEY, WS_COMMAND_ELSE_KEY } from '../decorators/websocket';
 import type { WsCommandDef } from '../decorators/websocket';
 import type { WsResponse } from '../types';
-import { Validator } from '../validation/validator';
+import { compileValidator } from '../validation/validator';
+import type { CompiledValidator, ValidateSchema } from '../validation/validator';
 import { compileFrame, CompiledFrame, FrameTemplate } from './frame';
 import { RESPONSE_FRAME_KEY } from '../decorators/response-frame';
 
@@ -1135,14 +1136,17 @@ export class VelocityApplication {
     const handlerUsesBody = injections.includes('body') || injections.includes('req');
     const parseBody = (isBodyMethod && handlerUsesBody) ? this.parseBody.bind(this) : null;
 
-    // Validation: from @Validate schema on route, or DTO class with static `schema`
-    let validationSchema: any = route.schema || null;
-    if (!validationSchema) {
+    // Validation: compile once at startup — supports Joi, Zod, Yup, plain functions
+    let validationSchema: CompiledValidator | null = null;
+    const rawSchema = route.schema || null;
+    if (rawSchema) {
+      validationSchema = compileValidator(rawSchema as ValidateSchema);
+    } else {
       const bodyIdx = injections.indexOf('body');
       if (bodyIdx !== -1) {
         const paramTypes = Reflect.getMetadata('design:paramtypes', Object.getPrototypeOf(controller), method) || [];
         const DtoClass = paramTypes[bodyIdx];
-        if (DtoClass?.schema) validationSchema = DtoClass.schema;
+        if (DtoClass?.schema) validationSchema = compileValidator(DtoClass.schema as ValidateSchema);
       }
     }
 
@@ -1209,9 +1213,9 @@ export class VelocityApplication {
     return async (req, res) => {
       try {
         if (parseBody) req.body = await parseBody(req as any, uploadOpts);
-        // Validate body (from @Validate or DTO static schema)
+        // Validate body (from @Validate or DTO static schema — compiled once at startup)
         if (validationSchema && req.body !== undefined) {
-          const { error, value } = Validator.validate(validationSchema, req.body);
+          const { error, value } = validationSchema(req.body);
           if (error) {
             if (!res.headersSent) {
               if (frame) {
@@ -1223,7 +1227,7 @@ export class VelocityApplication {
             }
             return;
           }
-          req.body = value; // apply Joi coercion
+          req.body = value; // apply coerced/transformed value
         }
         // Guards run before middleware — return 403 if any guard rejects
         if (guards) {

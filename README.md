@@ -18,7 +18,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **`@Fn` HTTP functions** — call any controller method at `GET /.name(arg1,arg2,...)`; no req/res boilerplate
 - **Guards** — `@Guards(fn)` decorator for boolean-return auth checks; runs before middleware
 - **Lifecycle hooks** — `velo.onRequest()`, `velo.onResponse()`, `velo.onError()` global hooks
-- **Cookies** — lazy `req.cookies` parsing, `res.setCookie(name, value, options)` with full options
+- **Cookies** — lazy `req.cookies` parsing, `res.setCookie` with full options, signed cookies (HMAC-SHA256), `res.clearCookie`
 - **File uploads** — `@Upload({ maxSize, maxFiles })` with Bun-native multipart; files on `req.files`
 - **WebSocket** — `@WebSocket('/path')` class decorator for Bun-native WebSocket gateways
 - **Response compression** — config-based gzip via `Bun.gzipSync()` for JSON/text responses
@@ -26,7 +26,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **Envelocity** — typed, read-only `.env` wrapper with `OrThrow` getters and nested key grouping
 - **API Tester** — auto-generated interactive testing UI from controller metadata
 - **Dependency injection** — constructor-based DI with singleton/transient support and child containers
-- **Validation** — Joi schemas with `@Validate` decorator
+- **Validation** — `@Validate` works with Joi, Zod, Yup, or plain functions; schema type detected at startup
 - **Middleware & interceptors** — function or class-based, per-route or per-registration
 - **CORS** — built-in config-based CORS with origin whitelist, credentials, OPTIONS handling
 - **Rate limiting** — built-in in-memory rate limiter with custom key generators
@@ -43,7 +43,9 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 | `npm run sync` | Symlink `dist/` into `node_modules/@velocity/framework` |
 | `npm run dev` | Build + sync in one step |
 | `npm run demo` | Run the full-demo example |
-| `bun test` | Run test suite (112 tests, ~200 ms) |
+| `npm test` | Run framework tests (`tests/`) |
+| `npm run test:demo` | Run demo project tests (build + `examples/full-demo/tests/`) |
+| `npm run test:all` | Run all tests (framework + demo) |
 
 ### `velogen` — Unified Code Generator
 
@@ -525,6 +527,104 @@ Optional pool config:
 export const db = DB({ type: 'postgresql', database: 'mydb', pool: { min: 5, max: 20 } });
 ```
 
+## Extensibility
+
+Velocity's features are **additive, not mandatory**. Use what you need, replace what you don't.
+
+### Validation — Joi, Zod, Yup, or plain functions
+
+`@Validate` accepts any validator. The schema type is detected once at startup (zero per-request cost):
+
+```typescript
+import * as Joi from 'joi';
+import { z } from 'zod';
+
+// Joi (built-in)
+@Validate(Validator.createSchema({ name: Joi.string().required() }))
+
+// Zod
+@Validate(z.object({ name: z.string(), email: z.string().email() }))
+
+// Plain function — throw on error, return validated data
+@Validate((body) => {
+  if (!body.name) throw new Error('name is required');
+  return body;
+})
+
+// Yup (has .validateSync)
+@Validate(yup.object({ name: yup.string().required() }))
+```
+
+### Custom database drivers
+
+Register drivers for databases beyond SQLite/PostgreSQL/MySQL:
+
+```typescript
+import { registerDriver, DB } from '@velocity/framework';
+
+registerDriver('libsql', {
+  async connect(config) {
+    const { createClient } = await import('@libsql/client');
+    return createClient({ url: config.host! });
+  },
+  async query(conn, sql, params) {
+    const result = await conn.execute({ sql, args: params });
+    return result.rows;
+  },
+  async execute(conn, sql, params) {
+    return await conn.execute({ sql, args: params });
+  },
+  async close(conn) { conn.close(); },
+});
+
+// Use it like any built-in driver
+const db = DB({ type: 'libsql', host: 'libsql://...' });
+```
+
+The `DatabaseDriver` interface:
+```typescript
+interface DatabaseDriver {
+  connect(config: DatabaseConfig): Promise<unknown>;
+  query(connection: unknown, sql: string, params: unknown[]): Promise<unknown[]>;
+  execute(connection: unknown, sql: string, params: unknown[]): Promise<unknown>;
+  close(connection: unknown): Promise<void>;
+}
+```
+
+### Logger
+
+Replace the built-in logger via the DI container:
+
+```typescript
+import pino from 'pino';
+velo.getContainer().register('logger', pino());
+```
+
+Any object with `debug/info/warn/error` methods works.
+
+### Cookies & sessions
+
+The built-in cookies (`req.cookies`, `res.setCookie`) are thin and optional. To use a different session library, add it as middleware and ignore the built-in cookie helpers.
+
+### Signed cookies
+
+```typescript
+const velo = new VelocityApplication({
+  port: 5000,
+  cookieSecret: 'your-secret-key',
+});
+
+// Set a signed cookie (HMAC-SHA256)
+res.setCookie('session', 'user-data', { signed: true, httpOnly: true });
+
+// Read verified cookies (false if tampered)
+const session = req.signedCookies?.session; // string | false
+```
+
+### What you can't replace
+
+The **router** and **DI container** are internal and not pluggable — they're small (128 and ~200 lines respectively) and there's no practical reason to swap them.
+
 ## Project Structure
 
 ```
@@ -540,7 +640,7 @@ src/
   orm/                     — Database, EntityAccessor, QueryBuilder, Connection, decorators
   middleware/              — CORS, rate limiting, security headers
   interceptors/            — TransformInterceptor
-  validation/              — Joi-based validation + @Validate
+  validation/              — Generic validation (Joi/Zod/Yup/fn) + @Validate
   logging/                 — Custom zero-dep structured logger
   testing/                 — TestUtils, @Suite/@Test decorator framework
 scripts/

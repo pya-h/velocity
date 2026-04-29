@@ -143,8 +143,8 @@ export class EntityAccessor<T = any> {
       sql += ' WHERE ' + entries.map(([key]) => `"${key}" = ?`).join(' AND ');
       params.push(...entries.map(([, v]) => v));
     }
-    const rows = await this.connection.query(sql, params);
-    return rows[0]?.count ?? 0;
+    const rows = await this.connection.query(sql, params) as Record<string, unknown>[];
+    return (rows[0]?.count as number) ?? 0;
   }
 
   query(): QueryBuilder {

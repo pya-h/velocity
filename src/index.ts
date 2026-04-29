@@ -27,7 +27,8 @@ export { Entity, Column, PrimaryKey } from './orm/decorators';
 export { DB, Database } from './orm/database';
 export { EntityAccessor } from './orm/entity-accessor';
 export { QueryBuilder } from './orm/query-builder';
-export { DatabaseConnection } from './orm/connection';
+export { DatabaseConnection, registerDriver } from './orm/connection';
+export type { DatabaseDriver } from './orm/connection';
 
 // Middleware exports
 export { CorsMiddleware } from './middleware/cors';
@@ -39,7 +40,8 @@ export { TransformInterceptor } from './interceptors/transform';
 
 // Utility exports
 export { Logger } from './logging/logger';
-export { Validator, Validate } from './validation/validator';
+export { Validator, Validate, compileValidator } from './validation/validator';
+export type { ValidateSchema, CompiledValidator } from './validation/validator';
 export { Config } from './config/config';
 export { createEnvelocity } from './config/envelocity';
 export type { EnvelocityOptions } from './config/envelocity';
