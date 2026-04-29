@@ -1,7 +1,7 @@
-import { VelocityRequest, VelocityResponse } from '../types';
+import { VeloRequest, VeloResponse } from '../types';
 
 export class TransformInterceptor {
-  public intercept(data: any, req: VelocityRequest, res: VelocityResponse): any {
+  public intercept(data: any, req: VeloRequest, res: VeloResponse): any {
     if (data === null || data === undefined) {
       return data;
     }

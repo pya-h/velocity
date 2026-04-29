@@ -3,7 +3,7 @@ import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
 import * as Joi from 'joi';
 import { Validator, Validate } from '../src/validation/validator';
 import { TestUtils } from '../src/testing/test-utils';
-import { VelocityApplication } from '../src/core/application';
+import { VeloApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Post } from '../src/decorators/route';
 
@@ -96,7 +96,7 @@ class ValidatorSchemaTests {
 
 @Suite('@Validate decorator')
 class ValidateDecoratorTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() {

@@ -1,5 +1,5 @@
 /**
- * VelocityChannel<T> — Go-style typed channel backed by BroadcastChannel.
+ * VeloChannel<T> — Go-style typed channel backed by BroadcastChannel.
  *
  * Works transparently across Bun Worker threads and the main thread.
  * Two channels created with the same name — even in different threads — are
@@ -15,7 +15,7 @@
  * For a single-consumer pattern, ensure only one receiver has the channel open.
  * Messages sent before any receiver is listening are NOT queued — they are lost.
  */
-export class VelocityChannel<T = any> {
+export class VeloChannel<T = any> {
   private readonly bc: BroadcastChannel;
   private readonly buffer: T[] = [];
   private readonly waiters: Array<(value: T) => void> = [];
@@ -36,7 +36,7 @@ export class VelocityChannel<T = any> {
 
   /** Send a value to all receivers on this channel. Non-blocking. */
   send(value: T): void {
-    if (this._closed) throw new Error(`VelocityChannel "${this.name}" is closed`);
+    if (this._closed) throw new Error(`VeloChannel "${this.name}" is closed`);
     this.bc.postMessage(value);
   }
 

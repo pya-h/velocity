@@ -1,7 +1,7 @@
 /**
  * Shared authentication guard — encrypted session cookie.
  *
- * Reads the VelocitySession (AES-256-GCM encrypted + HMAC signed),
+ * Reads the VeloSession (AES-256-GCM encrypted + HMAC signed),
  * verifies it, and populates `req.user` with the authenticated user's info.
  *
  * Usage:

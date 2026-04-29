@@ -1,11 +1,11 @@
-import { VelocityApplication } from '../core/application';
+import { VeloApplication } from '../core/application';
 import { Container } from '../core/container';
 import type { ApplicationConfig } from '../types';
 
 export class TestUtils {
-  /** Creates a VelocityApplication with logging suppressed — suitable for tests. */
-  public static createTestApp(config?: Partial<ApplicationConfig>): VelocityApplication {
-    return new VelocityApplication({
+  /** Creates a VeloApplication with logging suppressed — suitable for tests. */
+  public static createTestApp(config?: Partial<ApplicationConfig>): VeloApplication {
+    return new VeloApplication({
       port: 0,
       logger: { level: 'error', format: 'simple', outputs: [] as ('console' | 'file')[] },
       ...config,
@@ -13,7 +13,7 @@ export class TestUtils {
   }
 
   /**
-   * Creates a mock request object compatible with VelocityApplication's handleRequest().
+   * Creates a mock request object compatible with VeloApplication's handleRequest().
    *
    * For POST/PUT/PATCH with a `body`, a fake `__bunNativeRequest` is attached so that
    * parseBody() takes the Bun code-path and returns the body synchronously — no stream
@@ -62,7 +62,7 @@ export class TestUtils {
     return req;
   }
 
-  /** Creates a mock response object compatible with VelocityApplication's enhanceResponse(). */
+  /** Creates a mock response object compatible with VeloApplication's enhanceResponse(). */
   public static createMockResponse(): any {
     const res: any = {
       statusCode: 200,
@@ -124,7 +124,7 @@ export class TestUtils {
    * @returns `{ status, headers, body }` — body is parsed as JSON when possible.
    */
   public static async makeRequest(
-    app: VelocityApplication,
+    app: VeloApplication,
     options: {
       method: string;
       path: string;

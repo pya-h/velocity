@@ -1,8 +1,8 @@
 /**
- * JobController — REST interface for the @Go + VelocityChannel + PostgreSQL job queue demo.
+ * JobController — REST interface for the @Go + VeloChannel + PostgreSQL job queue demo.
  */
 import { Controller, Get, Post as HttpPost, Status, StatusCode } from '@velocity/framework';
-import type { VelocityResponse } from '@velocity/framework';
+import type { VeloResponse } from '@velocity/framework';
 import { velo } from '../../velo';
 import { pgDb } from '../../pgDb';
 import { jobChannel, resultChannel } from '../services/job.service';
@@ -61,7 +61,7 @@ class JobController {
 
   // ── Typed param + res for error handling ──────────────────────────────────
   @Get('/:id')
-  async getById(param: JobParams, res: VelocityResponse): Promise<{ job: unknown } | void> {
+  async getById(param: JobParams, res: VeloResponse): Promise<{ job: unknown } | void> {
     const id = parseInt(param.id);
     if (isNaN(id)) return res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' });
     const job = await pgDb.JobRecord.findById(id);

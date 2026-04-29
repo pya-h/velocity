@@ -107,7 +107,7 @@ export class Database {
  *   export const db1 = DB('analytics', { type: 'postgresql', ... });
  *   export const db2 = DB('cache', { type: 'sqlite', ... });
  *
- * The database auto-registers on the current VelocityApplication.
+ * The database auto-registers on the current VeloApplication.
  * Entities register on it: db.register(User).register(Post);
  * After app.listen(), access data: db.User.findAll(), db.Post.create({...})
  */

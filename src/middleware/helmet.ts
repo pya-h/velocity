@@ -1,4 +1,4 @@
-import { VelocityRequest, VelocityResponse } from '../types';
+import { VeloRequest, VeloResponse } from '../types';
 
 export interface HelmetOptions {
   contentSecurityPolicy?: boolean | object;
@@ -19,7 +19,7 @@ export interface HelmetOptions {
 export class HelmetMiddleware {
   constructor(private options: HelmetOptions = {}) {}
 
-  public use(_req: VelocityRequest, res: VelocityResponse, next: () => void): void {
+  public use(_req: VeloRequest, res: VeloResponse, next: () => void): void {
     if (this.options.contentSecurityPolicy !== false) {
       const csp = typeof this.options.contentSecurityPolicy === 'object'
         ? this.options.contentSecurityPolicy

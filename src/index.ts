@@ -1,7 +1,7 @@
 import './core/metadata';
 
 // Core exports
-export { VelocityApplication } from './core/application';
+export { VeloApplication } from './core/application';
 export { Container } from './core/container';
 
 // Decorator exports
@@ -18,11 +18,11 @@ export { Upload } from './decorators/upload';
 export { Status } from './decorators/status';
 export { ResponseFrame } from './decorators/response-frame';
 export { Frame } from './core/frame';
-export { VelocitySession } from './core/session';
+export { VeloSession } from './core/session';
 export type { SessionConfig } from './core/session';
 export type { FrameTemplate, CompiledFrame } from './core/frame';
 export { WebSocket, Command, CommandElse } from './decorators/websocket';
-export { VelocityChannel } from './channel/channel';
+export { VeloChannel } from './channel/channel';
 
 // ORM exports
 export { Entity, Column, PrimaryKey } from './orm/decorators';

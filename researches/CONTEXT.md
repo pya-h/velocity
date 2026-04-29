@@ -64,7 +64,7 @@ velo.register(ProfileController, { scope: [UserController] });
 All controller endpoints can be prefixed globally, with exclusions:
 
 ```typescript
-const velo = new VelocityApplication({
+const velo = new VeloApplication({
   globalPrefix: '/api',
   globalPrefixExclusions: ['/health']
 });
@@ -99,7 +99,7 @@ Databases are created with the `DB()` factory function, not via app config:
 export const db = DB({ type: 'sqlite', database: ':memory:' });
 ```
 
-`DB()` auto-registers on the current `VelocityApplication`. Multi-DB is supported.
+`DB()` auto-registers on the current `VeloApplication`. Multi-DB is supported.
 
 ### Type Generation (velogen / envgen)
 
@@ -112,7 +112,7 @@ export const db = DB({ type: 'sqlite', database: ':memory:' });
 src/
   index.ts              — Public API exports
   core/
-    application.ts      — VelocityApplication (HTTP server, registration, request pipeline)
+    application.ts      — VeloApplication (HTTP server, registration, request pipeline)
     container.ts        — DI container (parent/child, singleton, constructor injection, cycle detection)
     metadata.ts         — Internal Reflect metadata polyfill (~55 lines, replaces reflect-metadata)
   decorators/
@@ -122,10 +122,10 @@ src/
     middleware.ts       — @Middleware, @Middlewares
     interceptor.ts      — @Interceptor, @Interceptors
     go.ts               — @Go (background Bun Worker threads)
-    channel.ts          — @Channel (inject VelocityChannel into @Go methods)
+    channel.ts          — @Channel (inject VeloChannel into @Go methods)
     fn.ts               — @Fn (HTTP function calls at /.name(args))
   channel/
-    channel.ts          — VelocityChannel<T> (BroadcastChannel wrapper)
+    channel.ts          — VeloChannel<T> (BroadcastChannel wrapper)
   workers/
     go-runner.ts        — Worker entry point for @Go methods
   orm/
@@ -238,7 +238,7 @@ npm run demo
 ### reflect-metadata polyfill (T-09)
 `src/core/metadata.ts` is a 55-line WeakMap-based implementation that patches the global `Reflect` object. TypeScript's compiler (with `emitDecoratorMetadata: true`) only checks `typeof Reflect.metadata === "function"` before emitting `design:paramtypes` and `design:type` calls. The polyfill handles all three methods: `defineMetadata`, `getMetadata`, `metadata`.
 
-**⚠️ Warning for test controllers**: Decorated controller methods should use `any` for request parameter types (not `VelocityRequest`). `VelocityRequest` is a TypeScript interface (erased at runtime), but `emitDecoratorMetadata` tries to capture parameter types as runtime values. Using `any` avoids a Bun runtime error.
+**⚠️ Warning for test controllers**: Decorated controller methods should use `any` for request parameter types (not `VeloRequest`). `VeloRequest` is a TypeScript interface (erased at runtime), but `emitDecoratorMetadata` tries to capture parameter types as runtime values. Using `any` avoids a Bun runtime error.
 
 ### Bun runtime detection
 `const IS_BUN = typeof Bun !== 'undefined'` — used to branch between `Bun.serve()` and `http.createServer()` paths.
@@ -247,12 +247,12 @@ npm run demo
 Built at `listen()` time. Each segment is a `TrieNode` with a `children: Map<string, TrieNode>` (literals) and a single `paramChild: { name, node }` (`:param`). Literal matches always beat param matches at the same depth. A single param name is reused per segment level — if two routes have different param names at the same depth, the first registered wins with a warning.
 
 ### Test infrastructure
-`VelocityApplication.prepareForTesting()` initializes registrations and builds the trie without starting a server. `TestUtils.makeRequest()` calls it automatically. `createMockRequest` always sets `__bunNativeRequest` to force the Bun `parseBody` code path — without it, POST requests would hang waiting for stream events that mock objects never emit.
+`VeloApplication.prepareForTesting()` initializes registrations and builds the trie without starting a server. `TestUtils.makeRequest()` calls it automatically. `createMockRequest` always sets `__bunNativeRequest` to force the Bun `parseBody` code path — without it, POST requests would hang waiting for stream events that mock objects never emit.
 
 ## Entry Point Convention
 
 ```
 main.ts   — imports everything, calls velo.listen()
-velo.ts   — creates and exports VelocityApplication instance
+velo.ts   — creates and exports VeloApplication instance
 db.ts     — creates and exports DB instance(s)
 ```

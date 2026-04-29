@@ -1,11 +1,11 @@
 /**
- * E2E / integration tests — full request lifecycle through VelocityApplication.
+ * E2E / integration tests — full request lifecycle through VeloApplication.
  * No real network: TestUtils.makeRequest() drives handleRequest() directly.
  */
 import '../src/core/metadata';
 import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
 import { describe, test, expect as bunExpect, beforeEach } from 'bun:test';
-import { VelocityApplication } from '../src/core/application';
+import { VeloApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post, Put, Delete } from '../src/decorators/route';
 import { Middlewares } from '../src/decorators/middleware';
@@ -14,7 +14,7 @@ import { Fn } from '../src/decorators/fn';
 import { TestUtils } from '../src/testing/test-utils';
 
 // Note: decorated controller methods use `any` for request params because
-// VelocityRequest is an interface (erased at runtime) and emitDecoratorMetadata
+// VeloRequest is an interface (erased at runtime) and emitDecoratorMetadata
 // would try to reference it as a runtime value.
 
 const authGuard = (req: any, res: any, next: () => void) => {
@@ -63,7 +63,7 @@ class ItemController {
 
 @Suite('E2E — Response lifecycle')
 class ResponseLifecycleTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   async setup() {
@@ -147,7 +147,7 @@ class ResponseLifecycleTests {
 
 @Suite('E2E — Interceptors')
 class InterceptorTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   async setup() {
@@ -195,7 +195,7 @@ class InterceptorTests {
 
 @Suite('E2E — @Fn HTTP functions')
 class FnTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   async setup() {

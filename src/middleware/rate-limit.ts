@@ -1,10 +1,10 @@
-import { VelocityRequest, VelocityResponse } from '../types';
+import { VeloRequest, VeloResponse } from '../types';
 
 export interface RateLimitOptions {
   windowMs: number;
   max: number;
   message?: string;
-  keyGenerator?: (req: VelocityRequest) => string;
+  keyGenerator?: (req: VeloRequest) => string;
 }
 
 interface RateLimitStore {
@@ -19,7 +19,7 @@ export class RateLimitMiddleware {
 
   constructor(private options: RateLimitOptions) {}
 
-  public use(req: VelocityRequest, res: VelocityResponse, next: () => void): void {
+  public use(req: VeloRequest, res: VeloResponse, next: () => void): void {
     const key = this.options.keyGenerator 
       ? this.options.keyGenerator(req)
       : this.getClientKey(req);
@@ -50,7 +50,7 @@ export class RateLimitMiddleware {
     next();
   }
 
-  private getClientKey(req: VelocityRequest): string {
+  private getClientKey(req: VeloRequest): string {
     return req.headers['x-forwarded-for'] as string || 
            req.headers['x-real-ip'] as string ||
            req.socket?.remoteAddress || 

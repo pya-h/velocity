@@ -23,7 +23,7 @@ All notable changes to Velocity Framework will be documented in this file.
 - TypeScript-first design with full type safety
 
 ### Core Features
-- **Application**: VelocityApplication class for bootstrapping
+- **Application**: VeloApplication class for bootstrapping
 - **Controllers**: Decorator-based route definition
 - **Services**: Injectable services with dependency injection
 - **Middleware**: Reusable middleware components

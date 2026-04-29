@@ -1,4 +1,4 @@
-import { VelocityChannel } from '../channel/channel';
+import { VeloChannel } from '../channel/channel';
 
 export const CHANNEL_PARAM_METADATA_KEY = Symbol.for('velocity:channel-params');
 
@@ -9,14 +9,14 @@ export interface ChannelParamDef {
 
 /**
  * Parameter decorator for @Go methods.
- * Injects a VelocityChannel<T> instance with the given channel name into the worker.
+ * Injects a VeloChannel<T> instance with the given channel name into the worker.
  *
  * All parameters that receive data should be decorated with @Channel.
  * Any un-decorated parameter position will be undefined at runtime.
  *
  * @example
  * @Go()
- * async run(@Channel('velocity:jobs') jobs: VelocityChannel<Job>) {
+ * async run(@Channel('velocity:jobs') jobs: VeloChannel<Job>) {
  *   for await (const job of jobs) { ... }
  * }
  */
@@ -39,7 +39,7 @@ export function resolveChannelArgs(instance: any, method: string, data?: any): a
 
   const args: any[] = [];
   for (const { index, name } of defs) {
-    args[index] = new VelocityChannel(name);
+    args[index] = new VeloChannel(name);
   }
   return args;
 }

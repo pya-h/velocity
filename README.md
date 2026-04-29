@@ -19,7 +19,7 @@ A minimal, fast, type-safe TypeScript framework for Node.js/Bun with decorators,
 - **Guards** — `@Guards(fn)` decorator for boolean-return auth checks; runs before middleware
 - **Lifecycle hooks** — `velo.onRequest()`, `velo.onResponse()`, `velo.onError()` global hooks
 - **Cookies** — lazy `req.cookies` parsing, `res.setCookie` with full options, signed cookies (HMAC-SHA256), `res.clearCookie`
-- **Encrypted sessions** — `VelocitySession` with AES-256-GCM encryption + HMAC signing; zero overhead when unused
+- **Encrypted sessions** — `VeloSession` with AES-256-GCM encryption + HMAC signing; zero overhead when unused
 - **File uploads** — `@Upload({ maxSize, maxFiles })` with Bun-native multipart; files on `req.files`
 - **WebSocket** — `@WebSocket('/path')` class decorator for Bun-native WebSocket gateways
 - **Response compression** — config-based gzip via `Bun.gzipSync()` for JSON/text responses
@@ -90,9 +90,9 @@ After modifying framework source, re-run `npm run dev` to rebuild and sync.
 ### 1. Velocity instance (`velo.ts`)
 
 ```typescript
-import { VelocityApplication } from '@velocity/framework';
+import { VeloApplication } from '@velocity/framework';
 
-export const velo = new VelocityApplication({
+export const velo = new VeloApplication({
   port: 5000,
   globalPrefix: '/api',
   cors: { origin: '*', credentials: false },
@@ -135,7 +135,7 @@ db.register(User);
 
 ```typescript
 import { Controller, Get, Post as HttpPost, Middlewares, Validate, Validator,
-         VelocityRequest, VelocityResponse, MiddlewareFunction } from '@velocity/framework';
+         VeloRequest, VeloResponse, MiddlewareFunction } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
 import * as Joi from 'joi';
@@ -153,7 +153,7 @@ class UserController {
   @HttpPost('/')
   @Middlewares(auth)
   @Validate(Validator.createSchema({ name: Joi.string().required(), email: Joi.string().email().required() }))
-  async create(req: VelocityRequest, res: VelocityResponse) {
+  async create(req: VeloRequest, res: VeloResponse) {
     return res.status(201).json({ user: await db.User.create(req.body) });
   }
 }
@@ -287,7 +287,7 @@ interface RegisterOptions {
 ## Graceful Shutdown
 
 ```typescript
-const velo = new VelocityApplication({
+const velo = new VeloApplication({
   port: 5000,
   shutdown: { timeout: 10_000, auto: true },
 });
@@ -305,8 +305,8 @@ await velo.listen();
 class JobWorkerService {
   @Go()
   async run(
-    @Channel('velocity:jobs')    jobs: VelocityChannel<Job>,
-    @Channel('velocity:results') out:  VelocityChannel<JobResult>,
+    @Channel('velocity:jobs')    jobs: VeloChannel<Job>,
+    @Channel('velocity:results') out:  VeloChannel<JobResult>,
   ) {
     for await (const job of jobs) {
       out.send({ jobId: job.id, output: 'processed' });
@@ -316,7 +316,7 @@ class JobWorkerService {
 velo.register(JobWorkerService);
 ```
 
-`@Go` spawns a real Bun Worker thread when the server starts. `@Channel` injects `VelocityChannel<T>` (backed by `BroadcastChannel`) for typed cross-thread messaging. Falls back to event-loop concurrency on Node.js.
+`@Go` spawns a real Bun Worker thread when the server starts. `@Channel` injects `VeloChannel<T>` (backed by `BroadcastChannel`) for typed cross-thread messaging. Falls back to event-loop concurrency on Node.js.
 
 ## HTTP Function Calls (`@Fn`)
 
@@ -342,9 +342,9 @@ All HTTP methods reach `/.` routes. Return value is JSON; `undefined` → 204. N
 ## Guards
 
 ```typescript
-import { Guards, VelocityRequest } from '@velocity/framework';
+import { Guards, VeloRequest } from '@velocity/framework';
 
-const authGuard = (req: VelocityRequest) => !!req.headers['authorization'];
+const authGuard = (req: VeloRequest) => !!req.headers['authorization'];
 
 @Get('/protected')
 @Guards(authGuard)
@@ -399,7 +399,7 @@ Stateless, encrypted, cookie-based sessions. Data is AES-256-GCM encrypted + HMA
 ### Setup
 
 ```typescript
-const velo = new VelocityApplication({
+const velo = new VeloApplication({
   port: 5000,
   session: {
     secret: 'your-secret-key',    // AES-256-GCM + HMAC-SHA256
@@ -412,7 +412,7 @@ const velo = new VelocityApplication({
 ### Usage
 
 ```typescript
-import { VelocitySession } from '@velocity/framework';
+import { VeloSession } from '@velocity/framework';
 
 interface UserData {
   userId: number;
@@ -420,7 +420,7 @@ interface UserData {
 }
 
 @Post('/login')
-login(body: LoginDto, session: VelocitySession<UserData>, res: VelocityResponse) {
+login(body: LoginDto, session: VeloSession<UserData>, res: VeloResponse) {
   const user = authenticate(body); // your logic
   if (!user) { res.status(401).json({ error: 'Invalid' }); return; }
 
@@ -430,12 +430,12 @@ login(body: LoginDto, session: VelocitySession<UserData>, res: VelocityResponse)
 
 @Get('/me')
 @Guards(authGuard)
-me(session: VelocitySession<UserData>) {
+me(session: VeloSession<UserData>) {
   return session.data; // { userId: 1, role: 'admin' } — decrypted lazily
 }
 
 @Post('/logout')
-logout(session: VelocitySession) {
+logout(session: VeloSession) {
   session.destroy(); // clears the cookie
   return { ok: true };
 }
@@ -505,7 +505,7 @@ Bun-native WebSocket via `Bun.serve({ websocket })`. Path-based gateway dispatch
 ## Response Compression
 
 ```typescript
-const velo = new VelocityApplication({
+const velo = new VeloApplication({
   port: 5000,
   compression: { enabled: true, threshold: 1024 }, // gzip responses > 1 KB
 });
@@ -543,7 +543,7 @@ import { TestUtils } from '@velocity/framework';
 
 @Suite('User service')
 class UserServiceTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   // Factory re-called before each @Test — fresh mock, no accumulated call history
   @Mock(() => mock(() => [{ id: 1, name: 'Alice' }]))
@@ -594,7 +594,7 @@ import { describe, test, expect } from 'bun:test';
 import { TestUtils } from '@velocity/framework';
 ```
 
-> **Note:** Decorated controller methods in test fixtures must use `any` for request parameters (not `VelocityRequest`). TypeScript interfaces are erased at runtime, but `emitDecoratorMetadata` tries to capture them as values — causing a Bun error.
+> **Note:** Decorated controller methods in test fixtures must use `any` for request parameters (not `VeloRequest`). TypeScript interfaces are erased at runtime, but `emitDecoratorMetadata` tries to capture them as values — causing a Bun error.
 
 ## Supported Databases
 
@@ -692,7 +692,7 @@ The built-in cookies (`req.cookies`, `res.setCookie`) are thin and optional. To 
 ### Signed cookies
 
 ```typescript
-const velo = new VelocityApplication({
+const velo = new VeloApplication({
   port: 5000,
   cookieSecret: 'your-secret-key',
 });
@@ -718,7 +718,7 @@ src/
   config/envelocity.ts     — Envelocity runtime (env tree, Proxy, OrThrow)
   decorators/              — @Controller, @Get/@Post, @Service, @Middlewares, @Interceptors
                              @Go, @Channel, @Fn, @Guards, @Upload, @WebSocket
-  channel/                 — VelocityChannel<T> (BroadcastChannel wrapper)
+  channel/                 — VeloChannel<T> (BroadcastChannel wrapper)
   workers/                 — go-runner.ts (Bun Worker entry point for @Go)
   orm/                     — Database, EntityAccessor, QueryBuilder, Connection, decorators
   middleware/              — CORS, rate limiting, security headers

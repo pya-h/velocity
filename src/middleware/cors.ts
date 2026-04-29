@@ -1,4 +1,4 @@
-import { VelocityRequest, VelocityResponse } from '../types';
+import { VeloRequest, VeloResponse } from '../types';
 
 export interface CorsOptions {
   origin?: string | string[] | ((origin: string) => boolean);
@@ -11,7 +11,7 @@ export interface CorsOptions {
 export class CorsMiddleware {
   constructor(private options: CorsOptions = {}) {}
 
-  public use(req: VelocityRequest, res: VelocityResponse, next: () => void): void {
+  public use(req: VeloRequest, res: VeloResponse, next: () => void): void {
     const origin = req.headers.origin as string;
     const { 
       origin: allowedOrigin = '*',

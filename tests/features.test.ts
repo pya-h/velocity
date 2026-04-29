@@ -12,7 +12,7 @@
 import '../src/core/metadata';
 import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
 import { describe, test, expect as bunExpect } from 'bun:test';
-import { VelocityApplication } from '../src/core/application';
+import { VeloApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post } from '../src/decorators/route';
 import { Guards } from '../src/decorators/guard';
@@ -23,13 +23,13 @@ import { Frame } from '../src/core/frame';
 import { Fn } from '../src/decorators/fn';
 import { TestUtils } from '../src/testing/test-utils';
 import * as Joi from 'joi';
-import type { VelocityRequest, VelocityResponse, GuardFunction } from '../src/types';
+import type { VeloRequest, VeloResponse, GuardFunction } from '../src/types';
 
 // ─── Guards ─────────────────────────────────────────────────────────────────
 
 @Suite('Guards')
 class GuardTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() { this.app = TestUtils.createTestApp(); }
@@ -145,7 +145,7 @@ class CookieTests {
     @Controller('/ck1')
     class C {
       @Get('/')
-      get(req: VelocityRequest) { parsed = req.cookies; return 'ok'; }
+      get(req: VeloRequest) { parsed = req.cookies; return 'ok'; }
     }
 
     app.register(C);
@@ -164,7 +164,7 @@ class CookieTests {
     @Controller('/ck2')
     class C {
       @Get('/')
-      get(_req: VelocityRequest, res: VelocityResponse) {
+      get(_req: VeloRequest, res: VeloResponse) {
         res.setCookie('token', 'xyz', { httpOnly: true, path: '/' });
         return 'ok';
       }
@@ -185,7 +185,7 @@ class CookieTests {
     @Controller('/ck3')
     class C {
       @Get('/')
-      get(_req: VelocityRequest, res: VelocityResponse) {
+      get(_req: VeloRequest, res: VeloResponse) {
         res.setCookie('session', 'user123', { signed: true, httpOnly: true });
         return 'ok';
       }
@@ -212,7 +212,7 @@ class CookieTests {
     @Controller('/ck4')
     class C {
       @Get('/')
-      get(req: VelocityRequest) { verified = req.signedCookies; return 'ok'; }
+      get(req: VeloRequest) { verified = req.signedCookies; return 'ok'; }
     }
 
     app.register(C);
@@ -238,7 +238,7 @@ class CookieTests {
     @Controller('/ck5')
     class C {
       @Get('/')
-      get(req: VelocityRequest) { verified = req.signedCookies; return 'ok'; }
+      get(req: VeloRequest) { verified = req.signedCookies; return 'ok'; }
     }
 
     app.register(C);
@@ -258,7 +258,7 @@ class CookieTests {
     @Controller('/ck6')
     class C {
       @Get('/')
-      get(_req: VelocityRequest, res: VelocityResponse) {
+      get(_req: VeloRequest, res: VeloResponse) {
         res.clearCookie('session', { path: '/' });
         return 'ok';
       }
@@ -316,7 +316,7 @@ class StatusTests {
 
 @Suite('Param-name injection')
 class InjectionTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() { this.app = TestUtils.createTestApp(); }
@@ -367,7 +367,7 @@ class InjectionTests {
     @Controller('/inj4')
     class C {
       @Get('/')
-      get(req: VelocityRequest, res: VelocityResponse) {
+      get(req: VeloRequest, res: VeloResponse) {
         return res.status(200).json({ url: req.url });
       }
     }
@@ -545,11 +545,11 @@ describe('E2E — @Validate with guards + injection', () => {
   });
 });
 
-// ─── VelocitySession (encrypted cookie session) ─────────────────────────────
+// ─── VeloSession (encrypted cookie session) ─────────────────────────────
 
-import { VelocitySession } from '../src/core/session';
+import { VeloSession } from '../src/core/session';
 
-@Suite('VelocitySession')
+@Suite('VeloSession')
 class SessionTests {
   @Test('session.set() encrypts data and sets cookie')
   async setSession() {
@@ -558,7 +558,7 @@ class SessionTests {
     @Controller('/ses1')
     class C {
       @Post('/')
-      login(session: VelocitySession) {
+      login(session: VeloSession) {
         session.set({ userId: 42, role: 'admin' });
         return { ok: true };
       }
@@ -583,12 +583,12 @@ class SessionTests {
     @Controller('/ses2')
     class C {
       @Post('/login')
-      login(session: VelocitySession) {
+      login(session: VeloSession) {
         session.set({ name: 'Alice', role: 'user' });
         return { ok: true };
       }
       @Get('/me')
-      me(session: VelocitySession) {
+      me(session: VeloSession) {
         if (!session.valid) return { error: 'no session' };
         return session.data;
       }
@@ -620,7 +620,7 @@ class SessionTests {
     @Controller('/ses3')
     class C {
       @Post('/logout')
-      logout(session: VelocitySession) {
+      logout(session: VeloSession) {
         session.destroy();
         return { ok: true };
       }
@@ -642,7 +642,7 @@ class SessionTests {
     @Controller('/ses4')
     class C {
       @Get('/')
-      check(session: VelocitySession) {
+      check(session: VeloSession) {
         return { valid: session.valid, data: session.data };
       }
     }
@@ -682,7 +682,7 @@ class SessionTests {
     @Controller('/ses6')
     class C {
       @Post('/')
-      login(session: VelocitySession) {
+      login(session: VeloSession) {
         session.set({ ok: true });
         return { ok: true };
       }

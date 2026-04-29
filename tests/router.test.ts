@@ -1,6 +1,6 @@
 import '../src/core/metadata';
 import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
-import { VelocityApplication } from '../src/core/application';
+import { VeloApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post } from '../src/decorators/route';
 import { TestUtils } from '../src/testing/test-utils';
@@ -28,7 +28,7 @@ class RootController {
 
 @Suite('Trie Router — literal routes')
 class LiteralRouteTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }
@@ -65,7 +65,7 @@ class LiteralRouteTests {
 
 @Suite('Trie Router — parameterised routes')
 class ParamRouteTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }
@@ -104,7 +104,7 @@ class ParamRouteTests {
 
 @Suite('Trie Router — HTTP method separation')
 class MethodSeparationTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }

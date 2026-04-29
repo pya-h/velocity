@@ -1,44 +1,44 @@
 import { IncomingMessage, ServerResponse } from 'http';
-import type { VelocitySession } from '../core/session';
+import type { VeloSession } from '../core/session';
 
-export interface VelocityRequest extends IncomingMessage {
+export interface VeloRequest extends IncomingMessage {
   body?: unknown;
   params?: Record<string, string>;
   query?: Record<string, string>;
   headers: Record<string, string | string[] | undefined>;
   user?: unknown;
-  session?: VelocitySession;
+  session?: VeloSession;
   cookies?: Record<string, string>;
   /** Signed cookies — value is the verified plaintext, or `false` if signature invalid. */
   signedCookies?: Record<string, string | false>;
   files?: Record<string, UploadedFile | UploadedFile[]>;
 }
 
-export interface VelocityResponse extends ServerResponse {
+export interface VeloResponse extends ServerResponse {
   json(data: unknown): void;
-  status(code: number): VelocityResponse;
+  status(code: number): VeloResponse;
   send(data: unknown): void;
-  setCookie(name: string, value: string, options?: CookieOptions): VelocityResponse;
-  clearCookie(name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>): VelocityResponse;
+  setCookie(name: string, value: string, options?: CookieOptions): VeloResponse;
+  clearCookie(name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>): VeloResponse;
 }
 
 export interface RouteHandler {
-  (req: VelocityRequest, res: VelocityResponse): Promise<unknown> | unknown;
+  (req: VeloRequest, res: VeloResponse): Promise<unknown> | unknown;
 }
 
 export interface MiddlewareFunction {
-  (req: VelocityRequest, res: VelocityResponse, next: () => void): Promise<void> | void;
+  (req: VeloRequest, res: VeloResponse, next: () => void): Promise<void> | void;
 }
 
 export interface InterceptorFunction {
-  (data: unknown, req: VelocityRequest, res: VelocityResponse): Promise<unknown> | unknown;
+  (data: unknown, req: VeloRequest, res: VeloResponse): Promise<unknown> | unknown;
 }
 
-export type GuardFunction = (req: VelocityRequest) => boolean | Promise<boolean>;
+export type GuardFunction = (req: VeloRequest) => boolean | Promise<boolean>;
 
-export type OnRequestHook = (req: VelocityRequest) => void | Promise<void>;
-export type OnResponseHook = (req: VelocityRequest, res: VelocityResponse) => void | Promise<void>;
-export type OnErrorHook = (error: Error, req: VelocityRequest, res: VelocityResponse) => void | Promise<void>;
+export type OnRequestHook = (req: VeloRequest) => void | Promise<void>;
+export type OnResponseHook = (req: VeloRequest, res: VeloResponse) => void | Promise<void>;
+export type OnErrorHook = (error: Error, req: VeloRequest, res: VeloResponse) => void | Promise<void>;
 
 export interface CookieOptions {
   maxAge?: number;
@@ -165,7 +165,7 @@ export interface ColumnMetadata {
   primaryKey: boolean;
 }
 
-export interface VelocitySocket {
+export interface VeloSocket {
   send(data: string | ArrayBuffer | Uint8Array): void;
   close(code?: number, reason?: string): void;
   data: unknown;

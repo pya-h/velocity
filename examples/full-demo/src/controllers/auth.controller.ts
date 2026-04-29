@@ -3,9 +3,9 @@ import {
   Guards,
   Status, StatusCode,
   Validate, Validator,
-  VelocitySession,
+  VeloSession,
 } from '@velocity/framework';
-import type { VelocityResponse } from '@velocity/framework';
+import type { VeloResponse } from '@velocity/framework';
 import { velo } from '../../velo';
 import { authGuard, type SessionUser } from '../guards/auth.guard';
 import * as Joi from 'joi';
@@ -35,8 +35,8 @@ class AuthController {
   @Status(StatusCode.OK)
   login(
     body: { username: string; password: string },
-    session: VelocitySession<SessionUser>,
-    res: VelocityResponse,
+    session: VeloSession<SessionUser>,
+    res: VeloResponse,
   ): { message: string; user: string; role: string } | void {
     const entry = DEMO_USERS[body.username];
     if (!entry || entry.password !== body.password) {
@@ -56,7 +56,7 @@ class AuthController {
    */
   @Post('/logout')
   @Status(StatusCode.OK)
-  logout(session: VelocitySession): { message: string } {
+  logout(session: VeloSession): { message: string } {
     session.destroy();
     return { message: 'Logged out' };
   }

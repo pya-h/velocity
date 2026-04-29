@@ -1,4 +1,4 @@
-import { Service, Go, Channel, VelocityChannel } from '@velocity/framework';
+import { Service, Go, Channel, VeloChannel } from '@velocity/framework';
 import { velo } from '../../velo';
 
 export interface Job {
@@ -15,15 +15,15 @@ export interface JobResult {
 
 // Exported so job.controller.ts can send jobs and receive results on the main thread.
 // The @Go worker receives its own isolated channel instances via @Channel injection.
-export const jobChannel    = new VelocityChannel<Job>('velocity:jobs');
-export const resultChannel = new VelocityChannel<JobResult>('velocity:results');
+export const jobChannel    = new VeloChannel<Job>('velocity:jobs');
+export const resultChannel = new VeloChannel<JobResult>('velocity:results');
 
 @Service()
 class JobWorkerService {
   @Go()
   async run(
-    @Channel('velocity:jobs') jobs: VelocityChannel<Job>,
-    @Channel('velocity:results') out: VelocityChannel<JobResult>,
+    @Channel('velocity:jobs') jobs: VeloChannel<Job>,
+    @Channel('velocity:results') out: VeloChannel<JobResult>,
   ) {
     for await (const job of jobs) {
       await Bun.sleep(150);

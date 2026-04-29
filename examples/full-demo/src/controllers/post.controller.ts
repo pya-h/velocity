@@ -4,7 +4,7 @@ import {
   Validate, Validator,
   Status, StatusCode,
 } from '@velocity/framework';
-import type { VelocityRequest, VelocityResponse } from '@velocity/framework';
+import type { VeloRequest, VeloResponse } from '@velocity/framework';
 import { pgDb } from '../../pgDb';
 import { velo } from '../../velo';
 import { authGuard, type SessionUser } from '../guards/auth.guard';
@@ -19,7 +19,7 @@ interface PostParams {
   id: string;
 }
 
-const timingInterceptor = (data: unknown, req: VelocityRequest): unknown => {
+const timingInterceptor = (data: unknown, req: VeloRequest): unknown => {
   return {
     ...(data as Record<string, unknown>),
     _timing: { servedAt: new Date().toISOString(), path: req.url },
@@ -43,7 +43,7 @@ class PostController {
 
   // ── Public: get single post ────────────────────────────────────────────────
   @Get('/:id')
-  async getById(param: PostParams, res: VelocityResponse): Promise<{ post: unknown } | void> {
+  async getById(param: PostParams, res: VeloResponse): Promise<{ post: unknown } | void> {
     const id = parseInt(param.id);
     if (isNaN(id)) return res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' });
 
@@ -70,7 +70,7 @@ class PostController {
   // ── Protected: delete post (cookie auth) ───────────────────────────────────
   @Delete('/:id')
   @Guards(authGuard)
-  async remove(param: PostParams, res: VelocityResponse): Promise<void> {
+  async remove(param: PostParams, res: VeloResponse): Promise<void> {
     const id = parseInt(param.id);
     if (isNaN(id)) { res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' }); return; }
 

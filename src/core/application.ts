@@ -8,7 +8,7 @@ import { Logger } from '../logging/logger';
 import { Config } from '../config/config';
 import { Database, _setCurrentApp } from '../orm/database';
 import {
-  VelocityRequest, VelocityResponse, ApplicationConfig,
+  VeloRequest, VeloResponse, ApplicationConfig,
   RouteMetadata, ControllerMetadata, RegisterOptions,
   CookieOptions, UploadedFile, UploadOptions,
   OnRequestHook, OnResponseHook, OnErrorHook,
@@ -23,7 +23,7 @@ import { compileValidator } from '../validation/validator';
 import type { CompiledValidator, ValidateSchema } from '../validation/validator';
 import { compileFrame, CompiledFrame, FrameTemplate } from './frame';
 import { RESPONSE_FRAME_KEY } from '../decorators/response-frame';
-import { VelocitySession, compileSessionConfig } from './session';
+import { VeloSession, compileSessionConfig } from './session';
 import type { CompiledSession } from './session';
 
 const CONTROLLER_METADATA_KEY = Symbol.for('controller');
@@ -48,7 +48,7 @@ const INJECTABLE_MAP: Record<string, string> = {
   res: 'res', response: 'res',
 };
 
-type ArgBuilder = (req: VelocityRequest, res: VelocityResponse) => any;
+type ArgBuilder = (req: VeloRequest, res: VeloResponse) => any;
 
 const ARG_BUILDER_MAP: Record<string, ArgBuilder> = {
   body:    (req) => req.body,
@@ -85,15 +85,15 @@ function resolveInjectable(name: string): string | null {
 }
 
 // Shared response methods — allocated once, assigned by reference (no per-request closures)
-function _resJson(this: VelocityResponse, data: any) {
+function _resJson(this: VeloResponse, data: any) {
   this.setHeader('Content-Type', 'application/json');
   this.end(JSON.stringify(data));
 }
-function _resStatus(this: VelocityResponse, code: number) {
+function _resStatus(this: VeloResponse, code: number) {
   this.statusCode = code;
   return this;
 }
-function _resSend(this: VelocityResponse, data: any) {
+function _resSend(this: VeloResponse, data: any) {
   if (typeof data === 'string') {
     this.setHeader('Content-Type', 'text/plain');
     this.end(data);
@@ -127,11 +127,11 @@ function _unsignValue(signed: string, secret: string): string | false {
 
 // ─── Cookie helpers ──────────────────────────────────────────────────────────
 
-/** Bound to each VelocityResponse — captures `cookieSecret` from app config. */
+/** Bound to each VeloResponse — captures `cookieSecret` from app config. */
 let _cookieSecret: string | undefined;
 let _sessionConfig: CompiledSession | null = null;
 
-function _resCookie(this: VelocityResponse, name: string, value: string, options?: CookieOptions) {
+function _resCookie(this: VeloResponse, name: string, value: string, options?: CookieOptions) {
   const finalValue = (options?.signed && _cookieSecret) ? _signValue(value, _cookieSecret) : value;
   let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(finalValue)}`;
   if (options?.maxAge !== undefined) cookie += `; Max-Age=${options.maxAge}`;
@@ -149,7 +149,7 @@ function _resCookie(this: VelocityResponse, name: string, value: string, options
   return this;
 }
 
-function _resClearCookie(this: VelocityResponse, name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>) {
+function _resClearCookie(this: VeloResponse, name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>) {
   return this.setCookie(name, '', { ...options, maxAge: 0 });
 }
 
@@ -179,7 +179,7 @@ interface PendingRegistration {
   options: RegisterOptions;
 }
 
-type CompiledRouteHandler = (req: VelocityRequest, res: VelocityResponse) => Promise<void>;
+type CompiledRouteHandler = (req: VeloRequest, res: VeloResponse) => Promise<void>;
 
 interface CompiledWsGateway {
   instance: unknown;
@@ -197,7 +197,7 @@ interface TrieNode {
   handlers: Map<string, { route: RouteMetadata; controller: any; compiled: CompiledRouteHandler }>;
 }
 
-export class VelocityApplication {
+export class VeloApplication {
   private server: any;
   private container: Container;
   private logger: Logger;
@@ -360,7 +360,7 @@ export class VelocityApplication {
   };
 
   private sendFile(filePath: string, res: ServerResponse): void {
-    const mime = VelocityApplication.MIME[fsPath.extname(filePath).toLowerCase()] || 'application/octet-stream';
+    const mime = VeloApplication.MIME[fsPath.extname(filePath).toLowerCase()] || 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': mime });
     const stream = fs.createReadStream(filePath);
     stream.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
@@ -832,7 +832,7 @@ export class VelocityApplication {
       res.on('close', done);
     }
 
-    const velocityReq = req as VelocityRequest;
+    const velocityReq = req as VeloRequest;
     const velocityRes = this.enhanceResponse(res);
 
     try {
@@ -871,7 +871,7 @@ export class VelocityApplication {
         Object.defineProperty(velocityReq, 'session', {
           get() {
             const raw = _parseCookies(rawCookieHeader);
-            const val = new VelocitySession(raw[sessCfg.cookieName], sessCfg, velocityRes);
+            const val = new VeloSession(raw[sessCfg.cookieName], sessCfg, velocityRes);
             Object.defineProperty(this, 'session', { value: val, writable: true, enumerable: true, configurable: true });
             return val;
           },
@@ -942,8 +942,8 @@ export class VelocityApplication {
     }
   }
 
-  private enhanceResponse(res: ServerResponse): VelocityResponse {
-    const velocityRes = res as VelocityResponse;
+  private enhanceResponse(res: ServerResponse): VeloResponse {
+    const velocityRes = res as VeloResponse;
     velocityRes.json = _resJson;
     velocityRes.status = _resStatus;
     velocityRes.send = _resSend;
@@ -1000,7 +1000,7 @@ export class VelocityApplication {
     });
   }
 
-  private async parseMultipartBun(bunReq: Request, velocityReq: VelocityRequest, opts?: UploadOptions): Promise<any> {
+  private async parseMultipartBun(bunReq: Request, velocityReq: VeloRequest, opts?: UploadOptions): Promise<any> {
     const formData = await bunReq.formData();
     const body: Record<string, any> = {};
     const files: Record<string, UploadedFile | UploadedFile[]> = {};
@@ -1033,7 +1033,7 @@ export class VelocityApplication {
     return body;
   }
 
-  private async dispatchFunction(pathname: string, _req: VelocityRequest, res: VelocityResponse): Promise<void> {
+  private async dispatchFunction(pathname: string, _req: VeloRequest, res: VeloResponse): Promise<void> {
     const call = parseFunctionCall(pathname);
     if (!call) {
       res.status(404).json({ error: 'Route not found' });
@@ -1170,7 +1170,7 @@ export class VelocityApplication {
     // Build args for the handler call
     const hasArgs = argBuilders.length > 0;
     const callHandler = hasArgs
-      ? (req: VelocityRequest, res: VelocityResponse) =>
+      ? (req: VeloRequest, res: VeloResponse) =>
           controller[method](...argBuilders.map(fn => fn(req, res)))
       : () => controller[method]();
 
@@ -1182,7 +1182,7 @@ export class VelocityApplication {
     const frame: CompiledFrame | null = ctrlFrame ? compileFrame(ctrlFrame) : this.globalFrame;
 
     // Send response helper — applies @Status and ResponseFrame
-    const sendResult = (res: VelocityResponse, result: unknown) => {
+    const sendResult = (res: VeloResponse, result: unknown) => {
       if (res.headersSent) return;
       const status = defaultStatus || (result !== undefined ? 200 : 204);
       if (frame && result !== undefined) {
@@ -1198,7 +1198,7 @@ export class VelocityApplication {
 
     // Error handler — applies onError hooks, or ResponseFrame error path, or default 500
     const onErrorHooks = this._onError;
-    const handleError = async (req: VelocityRequest, res: VelocityResponse, error: unknown) => {
+    const handleError = async (req: VeloRequest, res: VeloResponse, error: unknown) => {
       const err = error instanceof Error ? error : new Error(String(error));
       if (onErrorHooks.length > 0) {
         for (const hook of onErrorHooks) await hook(err, req, res);
@@ -1405,7 +1405,7 @@ export class VelocityApplication {
 
   private tryServeStaticBun(pathname: string, requestHeaders: Headers): Response | null {
     const getMime = (fp: string) =>
-      VelocityApplication.MIME[fsPath.extname(fp).toLowerCase()] || 'application/octet-stream';
+      VeloApplication.MIME[fsPath.extname(fp).toLowerCase()] || 'application/octet-stream';
 
     const buildHeaders = (fp: string): Record<string, string> => {
       const h: Record<string, string> = { 'Content-Type': getMime(fp) };
@@ -1450,7 +1450,7 @@ export class VelocityApplication {
   private createBunReqRes(
     request: Request,
     url: URL,
-  ): { req: VelocityRequest; res: VelocityResponse; getResponse: () => Response } {
+  ): { req: VeloRequest; res: VeloResponse; getResponse: () => Response } {
     // Lazy header access — fetch from native Headers on demand instead of copying all upfront
     const nativeHeaders = request.headers;
     const headersCache: Record<string, string | undefined> = {};
@@ -1532,7 +1532,7 @@ export class VelocityApplication {
       clearCookie: _resClearCookie,
     };
 
-    const res = rawRes as unknown as VelocityResponse;
+    const res = rawRes as unknown as VeloResponse;
     const compress = this.compressionEnabled;
     const threshold = this.compressionThreshold;
     const acceptEnc = request.headers.get('accept-encoding') || '';
@@ -1552,6 +1552,6 @@ export class VelocityApplication {
       return new Response(_body || null, { status: _status, headers: _headers });
     };
 
-    return { req: req as VelocityRequest, res, getResponse };
+    return { req: req as VeloRequest, res, getResponse };
   }
 }

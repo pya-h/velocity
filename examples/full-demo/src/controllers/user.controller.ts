@@ -7,7 +7,7 @@ import {
   ResponseFrame, Frame,
   Fn,
 } from '@velocity/framework';
-import type { VelocityRequest, VelocityResponse } from '@velocity/framework';
+import type { VeloRequest, VeloResponse } from '@velocity/framework';
 import { db } from '../../db';
 import { velo } from '../../velo';
 import { authGuard, type SessionUser } from '../guards/auth.guard';
@@ -48,7 +48,7 @@ class UserController {
   @Get('/')
   @Status(StatusCode.OK)
   @Interceptors(TransformInterceptor)
-  async list(query: Record<string, string>, res: VelocityResponse): Promise<{ users: unknown[] }> {
+  async list(query: Record<string, string>, res: VeloResponse): Promise<{ users: unknown[] }> {
     res.setCookie('last-visit', new Date().toISOString(), {
       httpOnly: true, path: '/', maxAge: 86400,
     });
@@ -58,7 +58,7 @@ class UserController {
 
   // ── Public: get single user ────────────────────────────────────────────────
   @Get('/:id')
-  async getById(param: UserParams, res: VelocityResponse): Promise<{ user: unknown } | void> {
+  async getById(param: UserParams, res: VeloResponse): Promise<{ user: unknown } | void> {
     const id = parseInt(param.id);
     if (isNaN(id)) return res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' });
 
@@ -84,7 +84,7 @@ class UserController {
   // ── Protected: delete user (cookie auth, classic req+res style) ────────────
   @Delete('/:id')
   @Guards(authGuard)
-  async remove(req: VelocityRequest, res: VelocityResponse): Promise<void> {
+  async remove(req: VeloRequest, res: VeloResponse): Promise<void> {
     const id = parseInt(req.params!.id);
     if (isNaN(id)) { res.status(StatusCode.BadRequest).json({ error: 'Invalid ID' }); return; }
 

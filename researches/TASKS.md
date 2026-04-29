@@ -12,7 +12,7 @@
 **Area:** Throughput
 Velocity previously used `node:http` even on Bun. A thin adapter was added in `src/core/application.ts`:
 when `typeof Bun !== 'undefined'`, `listen()` calls `Bun.serve()` instead of `http.createServer()`.
-Incoming `Request` objects are normalized into fake Node-compatible `VelocityRequest`/`VelocityResponse`
+Incoming `Request` objects are normalized into fake Node-compatible `VeloRequest`/`VeloResponse`
 objects via `createBunReqRes()`; static files use `Bun.file()` directly.
 **Result (measured):** ~15,500 req/sec at c=200 (vs ~14,142 with `node:http`). Raw `Bun.serve()`
 baseline is ~17,800 at same concurrency — ~13% overhead. Main remaining cost: adapter layer +
@@ -142,7 +142,7 @@ Added `shutdown?: { timeout?: number; auto?: boolean }` to `ApplicationConfig`.
 `listen()` resolves. Handler calls `close()` then `process.exit(0/1)`.
 
 ```typescript
-export const velo = new VelocityApplication({
+export const velo = new VeloApplication({
   port: 5000,
   shutdown: { timeout: 10_000, auto: true }, // register SIGTERM/SIGINT automatically
 });
@@ -192,7 +192,7 @@ calls go through the same storage as custom framework metadata keys.
 - `createMockResponse` includes no-op `on/once/emit/removeListener` stubs (required for graceful-shutdown request tracking)
 - `makeRequest` catches JSON parse errors and returns raw string body as fallback
 
-**`VelocityApplication.prepareForTesting()`** (new public method):
+**`VeloApplication.prepareForTesting()`** (new public method):
 Initializes registrations and builds the route trie without starting a server. Idempotent (`ready` flag). Called automatically by `TestUtils.makeRequest()`.
 
 **Test files** (`tests/`):
@@ -206,7 +206,7 @@ Initializes registrations and builds the route trie without starting a server. I
 | `query-builder.test.ts` | plain `describe/test` | SELECT/WHERE/JOIN/ORDER/LIMIT/OFFSET, INSERT/RETURNING, UPDATE, DELETE, identifier safety |
 | `e2e.test.ts` | `@Suite` + plain | Full pipeline: GET/POST/PUT/DELETE, auth middleware, 204 on undefined return, 500 on throw, interceptors, `@Fn` dispatch, config-based CORS, preflight, idempotent `prepareForTesting()` |
 
-**Usage note:** controller method parameters in test fixtures must use `any` (not `VelocityRequest`) because `emitDecoratorMetadata` captures parameter types as runtime values and TypeScript interfaces don't exist at runtime.
+**Usage note:** controller method parameters in test fixtures must use `any` (not `VeloRequest`) because `emitDecoratorMetadata` captures parameter types as runtime values and TypeScript interfaces don't exist at runtime.
 
 ---
 
@@ -319,7 +319,7 @@ Text fields from multipart become `req.body`.
 ```typescript
 @Post('/avatar')
 @Upload({ maxSize: 5 * 1024 * 1024 })
-async uploadAvatar(req: VelocityRequest) {
+async uploadAvatar(req: VeloRequest) {
   const file = req.files!.avatar as UploadedFile;
   return { name: file.originalname, size: file.size };
 }
@@ -343,7 +343,7 @@ class ChatGateway {
 }
 velo.registerWebSocket(ChatGateway);
 ```
-**Implementation:** `src/decorators/websocket.ts`, `VelocityApplication.registerWebSocket()`,
+**Implementation:** `src/decorators/websocket.ts`, `VeloApplication.registerWebSocket()`,
 `bunFetchHandler` upgrade check, `listen()` websocket config wiring.
 
 ---
@@ -363,7 +363,7 @@ path parameters. Accessible via `velogen oa <dir>` or `velogen openapi <dir>`.
 Guards run **before** middleware in the compiled handler. Follows the same pending-merge
 pattern as `@Middlewares` (works regardless of decorator order).
 ```typescript
-const authGuard = (req: VelocityRequest) => !!req.headers['authorization'];
+const authGuard = (req: VeloRequest) => !!req.headers['authorization'];
 
 @Get('/protected')
 @Guards(authGuard)
@@ -391,15 +391,15 @@ method is launched in a **real Bun Worker thread** — a separate OS thread with
 context. True CPU + I/O parallelism; the worker never blocks the main request-handling thread.
 
 Channels are injected directly into worker method parameters via the `@Channel(name)` parameter
-decorator. No manual `new VelocityChannel(...)` instantiation needed inside the method body.
-`VelocityChannel<T>` is backed by `BroadcastChannel` — fully cross-thread typed message passing.
+decorator. No manual `new VeloChannel(...)` instantiation needed inside the method body.
+`VeloChannel<T>` is backed by `BroadcastChannel` — fully cross-thread typed message passing.
 ```typescript
 @Service()
 class JobWorkerService {
   @Go()
   async run(
-    @Channel('velocity:jobs') jobs: VelocityChannel<Job>,
-    @Channel('velocity:results') out: VelocityChannel<JobResult>,
+    @Channel('velocity:jobs') jobs: VeloChannel<Job>,
+    @Channel('velocity:results') out: VeloChannel<JobResult>,
   ) {
     for await (const job of jobs) {
       out.send({ jobId: job.id, output: `processed` });
@@ -416,7 +416,7 @@ service file path; no manual annotation needed.
 Fallback: if not on Bun, or if file detection fails, falls back to event-loop concurrency
 with a warning logged.
 **Implementation:** `src/decorators/go.ts`, `src/decorators/channel.ts`,
-`src/workers/go-runner.ts`, `VelocityApplication.startGoMethods()` (spawns `new Worker(goRunnerPath)`).
+`src/workers/go-runner.ts`, `VeloApplication.startGoMethods()` (spawns `new Worker(goRunnerPath)`).
 
 ---
 
@@ -446,8 +446,8 @@ Errors thrown from the function are caught and returned as `{ error: message }` 
 Argument parsing is safe — no `eval`; state-machine parser with a 2000-char decoded arg limit.
 `@Fn(name?)` accepts an optional alias: `@Fn('getUser')` registers as `/.getUser(...)`.
 **Implementation:** `src/decorators/fn.ts` (`@Fn`, `parseFunctionCall`, `parseFnArgs`),
-`VelocityApplication.functionRegistry` (Map populated during `registerController`),
-`VelocityApplication.dispatchFunction()` (intercepts `pathname.startsWith('/.')` in `handleRequest`).
+`VeloApplication.functionRegistry` (Map populated during `registerController`),
+`VeloApplication.dispatchFunction()` (intercepts `pathname.startsWith('/.')` in `handleRequest`).
 
 ---
 

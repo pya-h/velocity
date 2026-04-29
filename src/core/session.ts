@@ -1,5 +1,5 @@
 /**
- * VelocitySession — encrypted, signed, stateless cookie session.
+ * VeloSession — encrypted, signed, stateless cookie session.
  *
  * Data is AES-256-GCM encrypted + HMAC-SHA256 signed in a single httpOnly cookie.
  * Zero server-side state — everything lives in the cookie. Decryption is lazy:
@@ -10,7 +10,7 @@
  * Cost per-request when used: ~3μs (one AES decrypt + one HMAC verify).
  */
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-import type { VelocityResponse } from '../types';
+import type { VeloResponse } from '../types';
 
 export interface SessionConfig {
   /** Secret key for encryption + signing. */
@@ -89,16 +89,16 @@ export function compileSessionConfig(config: SessionConfig): CompiledSession {
   };
 }
 
-// ─── VelocitySession class ─────────────��─────────────────────────────────────
+// ─── VeloSession class ─────────────��─────────────────────────────────────
 
-export class VelocitySession<T = Record<string, unknown>> {
+export class VeloSession<T = Record<string, unknown>> {
   private _data: T | null | undefined = undefined; // undefined = not yet decrypted
   private _rawCookie: string | undefined;
   private _compiled: CompiledSession;
-  private _res: VelocityResponse;
+  private _res: VeloResponse;
   private _dirty = false;
 
-  constructor(rawCookie: string | undefined, compiled: CompiledSession, res: VelocityResponse) {
+  constructor(rawCookie: string | undefined, compiled: CompiledSession, res: VeloResponse) {
     this._rawCookie = rawCookie;
     this._compiled = compiled;
     this._res = res;

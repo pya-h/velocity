@@ -1,20 +1,20 @@
 import '../src/core/metadata';
 import { Suite, Test, BeforeEach, expect, mock } from '../src/testing/decorators';
 import { describe, test, expect as bunExpect } from 'bun:test';
-import { VelocityApplication } from '../src/core/application';
+import { VeloApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
 import { Get, Post } from '../src/decorators/route';
 import { Middlewares } from '../src/decorators/middleware';
 import { TestUtils } from '../src/testing/test-utils';
 import { CorsMiddleware } from '../src/middleware/cors';
 import { RateLimitMiddleware } from '../src/middleware/rate-limit';
-import { MiddlewareFunction, VelocityRequest, VelocityResponse } from '../src/types';
+import { MiddlewareFunction, VeloRequest, VeloResponse } from '../src/types';
 
 // ─── Middleware chain ────────────────────────────────────────────────────────
 
 @Suite('Middleware chain')
 class MiddlewareChainTests {
-  private app!: VelocityApplication;
+  private app!: VeloApplication;
 
   @BeforeEach
   setup() {

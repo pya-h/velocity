@@ -11,7 +11,7 @@
  */
 import { expect } from 'bun:test';
 import { Suite, Test, BeforeAll, TestUtils } from '@velocity/framework';
-import type { VelocityApplication } from '@velocity/framework';
+import type { VeloApplication } from '@velocity/framework';
 
 // Import the actual velo instance — this creates the real app with real config
 import { velo } from '../velo';
@@ -25,7 +25,7 @@ import '../src/controllers/user.controller';
 
 @Suite('E2E — Health endpoint')
 class HealthTests {
-  private app: VelocityApplication = velo;
+  private app: VeloApplication = velo;
 
   @BeforeAll
   async setup() { await this.app.prepareForTesting(); }
@@ -45,7 +45,7 @@ class HealthTests {
 
 @Suite('E2E — Auth flow (actual auth controller)')
 class AuthE2ETests {
-  private app: VelocityApplication = velo;
+  private app: VeloApplication = velo;
 
   @BeforeAll
   async setup() { await this.app.prepareForTesting(); }
@@ -139,7 +139,7 @@ class AuthE2ETests {
 
 @Suite('E2E — User controller guards & validation')
 class UserGuardTests {
-  private app: VelocityApplication = velo;
+  private app: VeloApplication = velo;
 
   @BeforeAll
   async setup() { await this.app.prepareForTesting(); }

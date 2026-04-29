@@ -1,5 +1,5 @@
 import { Controller, Post as HttpPost, Upload, Guards, Status, StatusCode } from '@velocity/framework';
-import type { VelocityResponse, UploadedFile } from '@velocity/framework';
+import type { VeloResponse, UploadedFile } from '@velocity/framework';
 import { velo } from '../../velo';
 import { authGuard, type SessionUser } from '../guards/auth.guard';
 
@@ -20,7 +20,7 @@ class UploadController {
   async avatar(
     file: Record<string, UploadedFile | UploadedFile[]> | undefined,
     user: SessionUser,
-    res: VelocityResponse,
+    res: VeloResponse,
   ): Promise<UploadResult | void> {
     const avatar = file?.avatar as UploadedFile | undefined;
     if (!avatar) return res.status(StatusCode.BadRequest).json({ error: 'No file uploaded (field: avatar)' });
@@ -41,7 +41,7 @@ class UploadController {
     body: Record<string, unknown>,
     file: Record<string, UploadedFile | UploadedFile[]> | undefined,
     user: SessionUser,
-    res: VelocityResponse,
+    res: VeloResponse,
   ): Promise<{ uploadedBy: string; textFields: Record<string, unknown>; files: unknown[] } | void> {
     if (!file || Object.keys(file).length === 0) {
       return res.status(StatusCode.BadRequest).json({ error: 'No files uploaded' });
