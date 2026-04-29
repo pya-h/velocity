@@ -1,23 +1,20 @@
 import '../src/core/metadata';
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { Suite, Test, BeforeEach, expect } from '../src/testing/decorators';
 import { VelocityApplication } from '../src/core/application';
 import { Controller } from '../src/decorators/controller';
-import { Get, Post, Delete } from '../src/decorators/route';
+import { Get, Post } from '../src/decorators/route';
 import { TestUtils } from '../src/testing/test-utils';
 
 // ─── Fixture controllers (defined once; each test gets a fresh app instance) ─
-// Note: parameter types use `any` — VelocityRequest is an interface (erased at runtime)
-// and emitDecoratorMetadata would try to capture it as a value, causing a Bun runtime error.
 
 @Controller('/users')
 class UserController {
-  @Get('/')         list()             { return []; }
-  @Get('/settings') settings()         { return 'settings'; }
-  @Get('/:id')      findById(req: any) { return { id: req.params.id }; }
-  @Post('/')        create()           { return 'created'; }
-  @Get('/:id/posts')         userPosts(req: any)   { return { userId: req.params.id }; }
-  // Note: must use :id here too — the trie shares one param name per segment level
-  @Get('/:id/posts/:postId') postDetail(req: any) {
+  @Get('/')         list()              { return []; }
+  @Get('/settings') settings()          { return 'settings'; }
+  @Get('/:id')      findById(req: any)  { return { id: req.params.id }; }
+  @Post('/')        create()            { return 'created'; }
+  @Get('/:id/posts')         userPosts(req: any)    { return { userId: req.params.id }; }
+  @Get('/:id/posts/:postId') postDetail(req: any)   {
     return { userId: req.params.id, postId: req.params.postId };
   }
 }
@@ -27,97 +24,112 @@ class RootController {
   @Get('/') root() { return 'root'; }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Literal routes ──────────────────────────────────────────────────────────
 
-describe('Trie Router — literal routes', () => {
-  let app: VelocityApplication;
+@Suite('Trie Router — literal routes')
+class LiteralRouteTests {
+  private app!: VelocityApplication;
 
-  beforeEach(() => {
-    app = TestUtils.createTestApp();
-    app.register(UserController);
-  });
+  @BeforeEach
+  setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }
 
-  test('GET /users returns 200', async () => {
-    const { status } = await TestUtils.makeRequest(app, { method: 'GET', path: '/users' });
+  @Test('GET /users returns 200')
+  async getUsers() {
+    const { status } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/users' });
     expect(status).toBe(200);
-  });
+  }
 
-  test('root controller GET /', async () => {
+  @Test('root controller GET /')
+  async rootRoute() {
     const rootApp = TestUtils.createTestApp();
     rootApp.register(RootController);
     const { status, body } = await TestUtils.makeRequest(rootApp, { method: 'GET', path: '/' });
     expect(status).toBe(200);
     expect(body).toBe('root');
-  });
+  }
 
-  test('unknown path returns 404', async () => {
-    const { status } = await TestUtils.makeRequest(app, { method: 'GET', path: '/nonexistent' });
+  @Test('unknown path returns 404')
+  async unknownPath() {
+    const { status } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/nonexistent' });
     expect(status).toBe(404);
-  });
+  }
 
-  test('wrong HTTP method returns 404', async () => {
-    const { status } = await TestUtils.makeRequest(app, { method: 'DELETE', path: '/users' });
+  @Test('wrong HTTP method returns 404')
+  async wrongMethod() {
+    const { status } = await TestUtils.makeRequest(this.app, { method: 'DELETE', path: '/users' });
     expect(status).toBe(404);
-  });
-});
+  }
+}
 
-describe('Trie Router — parameterised routes', () => {
-  let app: VelocityApplication;
+// ─── Parameterised routes ────────────────────────────────────────────────────
 
-  beforeEach(() => {
-    app = TestUtils.createTestApp();
-    app.register(UserController);
-  });
+@Suite('Trie Router — parameterised routes')
+class ParamRouteTests {
+  private app!: VelocityApplication;
 
-  test('extracts single :id param', async () => {
-    const { status, body } = await TestUtils.makeRequest(app, { method: 'GET', path: '/users/42' });
+  @BeforeEach
+  setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }
+
+  @Test('extracts single :id param')
+  async singleParam() {
+    const { status, body } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/users/42' });
     expect(status).toBe(200);
     expect(body.id).toBe('42');
-  });
+  }
 
-  test('literal segment wins over :param at same depth (/users/settings)', async () => {
-    const { status, body } = await TestUtils.makeRequest(app, { method: 'GET', path: '/users/settings' });
+  @Test('literal segment wins over :param at same depth (/users/settings)')
+  async literalWins() {
+    const { status, body } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/users/settings' });
     expect(status).toBe(200);
     expect(body).toBe('settings');
-  });
+  }
 
-  test('two-level param route /:id/posts', async () => {
-    const { status, body } = await TestUtils.makeRequest(app, { method: 'GET', path: '/users/5/posts' });
+  @Test('two-level param route /:id/posts')
+  async nestedParam() {
+    const { status, body } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/users/5/posts' });
     expect(status).toBe(200);
     expect(body.userId).toBe('5');
-  });
+  }
 
-  test('two distinct params /:userId/posts/:postId', async () => {
-    const { status, body } = await TestUtils.makeRequest(app, { method: 'GET', path: '/users/7/posts/99' });
+  @Test('two distinct params /:id/posts/:postId')
+  async twoParams() {
+    const { status, body } = await TestUtils.makeRequest(this.app, { method: 'GET', path: '/users/7/posts/99' });
     expect(status).toBe(200);
     expect(body.userId).toBe('7');
     expect(body.postId).toBe('99');
-  });
-});
+  }
+}
 
-describe('Trie Router — HTTP method separation', () => {
-  let app: VelocityApplication;
+// ─── HTTP method separation ──────────────────────────────────────────────────
 
-  beforeEach(() => {
-    app = TestUtils.createTestApp();
-    app.register(UserController);
-  });
+@Suite('Trie Router — HTTP method separation')
+class MethodSeparationTests {
+  private app!: VelocityApplication;
 
-  test('GET /users and POST /users are independent', async () => {
-    const get  = await TestUtils.makeRequest(app, { method: 'GET',  path: '/users' });
-    const post = await TestUtils.makeRequest(app, { method: 'POST', path: '/users' });
+  @BeforeEach
+  setup() { this.app = TestUtils.createTestApp(); this.app.register(UserController); }
+
+  @Test('GET /users and POST /users are independent')
+  async getAndPost() {
+    const get  = await TestUtils.makeRequest(this.app, { method: 'GET',  path: '/users' });
+    const post = await TestUtils.makeRequest(this.app, { method: 'POST', path: '/users' });
     expect(get.status).toBe(200);
     expect(post.status).toBe(200);
-  });
+  }
 
-  test('DELETE /users → 404 (not registered)', async () => {
-    const { status } = await TestUtils.makeRequest(app, { method: 'DELETE', path: '/users' });
+  @Test('DELETE /users → 404 (not registered)')
+  async noDelete() {
+    const { status } = await TestUtils.makeRequest(this.app, { method: 'DELETE', path: '/users' });
     expect(status).toBe(404);
-  });
-});
+  }
+}
 
-describe('Trie Router — global prefix', () => {
-  test('all routes are prefixed with /api', async () => {
+// ─── Global prefix ──────────────────────────────────────────────────────────
+
+@Suite('Trie Router — global prefix')
+class GlobalPrefixTests {
+  @Test('all routes are prefixed with /api')
+  async prefixed() {
     const app = TestUtils.createTestApp({ globalPrefix: '/api' });
     app.register(UserController);
 
@@ -126,13 +138,12 @@ describe('Trie Router — global prefix', () => {
 
     expect(prefixed.status).toBe(200);
     expect(raw.status).toBe(404);
-  });
+  }
 
-  test('globalPrefixExclusions bypass the prefix', async () => {
+  @Test('globalPrefixExclusions bypass the prefix')
+  async exclusions() {
     @Controller('/health')
-    class HealthController {
-      @Get('/') ping() { return 'ok'; }
-    }
+    class HealthController { @Get('/') ping() { return 'ok'; } }
 
     const app = TestUtils.createTestApp({
       globalPrefix: '/api',
@@ -145,5 +156,5 @@ describe('Trie Router — global prefix', () => {
 
     expect(excluded.status).toBe(200);
     expect(prefixed.status).toBe(404);
-  });
-});
+  }
+}

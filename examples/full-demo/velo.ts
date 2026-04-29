@@ -9,6 +9,7 @@ export const velo = new VelocityApplication({
   port: parseInt(envelocity.server.portOrThrow),
   host: envelocity.server.hostOrThrow,
   globalPrefix: '/api',
+  cookieSecret: envelocity.auth.jwtSecret ?? 'change-me-in-production',
   logger: {
     level: 'info',
     format: 'combined',

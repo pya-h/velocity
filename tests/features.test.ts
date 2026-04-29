@@ -177,6 +177,99 @@ class CookieTests {
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('Path=/');
   }
+
+  @Test('signed cookie — value is signed with HMAC')
+  async signedCookie() {
+    const app = TestUtils.createTestApp({ cookieSecret: 'test-secret-key' });
+
+    @Controller('/ck3')
+    class C {
+      @Get('/')
+      get(_req: VelocityRequest, res: VelocityResponse) {
+        res.setCookie('session', 'user123', { signed: true, httpOnly: true });
+        return 'ok';
+      }
+    }
+
+    app.register(C);
+    const { headers } = await TestUtils.makeRequest(app, { method: 'GET', path: '/ck3' });
+    const setCookie = headers['set-cookie'] as string;
+    // Signed value contains a dot separator with the HMAC signature
+    expect(setCookie).toContain('session=');
+    expect(setCookie).toContain('HttpOnly');
+    // Value should be URL-encoded "user123.<signature>"
+    const match = setCookie.match(/session=([^;]+)/);
+    const decoded = decodeURIComponent(match![1]);
+    expect(decoded).toContain('user123.');
+    expect(decoded.split('.').length).toBe(2);
+  }
+
+  @Test('req.signedCookies verifies valid signature')
+  async verifySignedCookie() {
+    const app = TestUtils.createTestApp({ cookieSecret: 'my-secret' });
+    let verified: Record<string, string | false> | undefined;
+
+    @Controller('/ck4')
+    class C {
+      @Get('/')
+      get(req: VelocityRequest) { verified = req.signedCookies; return 'ok'; }
+    }
+
+    app.register(C);
+
+    // First, get a signed cookie value
+    const { createHmac } = await import('crypto');
+    const sig = createHmac('sha256', 'my-secret').update('session-data').digest('base64url');
+    const signedValue = `session-data.${sig}`;
+
+    await TestUtils.makeRequest(app, {
+      method: 'GET', path: '/ck4',
+      headers: { cookie: `token=${encodeURIComponent(signedValue)}` },
+    });
+
+    expect(verified?.token).toBe('session-data');
+  }
+
+  @Test('req.signedCookies returns false for tampered cookie')
+  async tamperedCookie() {
+    const app = TestUtils.createTestApp({ cookieSecret: 'my-secret' });
+    let verified: Record<string, string | false> | undefined;
+
+    @Controller('/ck5')
+    class C {
+      @Get('/')
+      get(req: VelocityRequest) { verified = req.signedCookies; return 'ok'; }
+    }
+
+    app.register(C);
+
+    await TestUtils.makeRequest(app, {
+      method: 'GET', path: '/ck5',
+      headers: { cookie: 'token=tampered-value.invalid-signature' },
+    });
+
+    expect(verified?.token).toBe(false);
+  }
+
+  @Test('res.clearCookie sets Max-Age=0')
+  async clearCookie() {
+    const app = TestUtils.createTestApp();
+
+    @Controller('/ck6')
+    class C {
+      @Get('/')
+      get(_req: VelocityRequest, res: VelocityResponse) {
+        res.clearCookie('session', { path: '/' });
+        return 'ok';
+      }
+    }
+
+    app.register(C);
+    const { headers } = await TestUtils.makeRequest(app, { method: 'GET', path: '/ck6' });
+    const setCookie = headers['set-cookie'] as string;
+    expect(setCookie).toContain('session=');
+    expect(setCookie).toContain('Max-Age=0');
+  }
 }
 
 // ─── @Status decorator ──────────────────────────────────────────────────────

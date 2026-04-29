@@ -131,6 +131,32 @@ class ContainerTests {
     expect(child.has('shared')).toBe(true);
   }
 
+  // ─── Falsy values ───
+
+  @Test('resolves 0 (falsy number)')
+  resolveFalsyZero() {
+    this.container.register('zero', 0);
+    expect(this.container.resolve('zero') as unknown).toBe(0);
+  }
+
+  @Test('resolves empty string (falsy)')
+  resolveFalsyEmptyString() {
+    this.container.register('empty', '');
+    expect(this.container.resolve('empty') as unknown).toBe('');
+  }
+
+  @Test('resolves false (falsy boolean)')
+  resolveFalsyFalse() {
+    this.container.register('flag', false);
+    expect(this.container.resolve('flag') as unknown).toBe(false);
+  }
+
+  @Test('resolves null (explicit null)')
+  resolveFalsyNull() {
+    this.container.register('nothing', null);
+    expect(this.container.resolve('nothing')).toBeNull();
+  }
+
   // ─── Throws when missing ───
 
   @Test('throws when resolving unknown string identifier')

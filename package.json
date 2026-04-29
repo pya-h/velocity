@@ -10,7 +10,9 @@
     "dev": "bun run build && bun run sync",
     "velogen": "bun scripts/velogen.js",
     "demo": "cd examples/full-demo && bun run main.ts",
-    "test": "bun test"
+    "test": "bun test tests/",
+    "test:demo": "bun run build && bun test examples/full-demo/tests/",
+    "test:all": "bun run build && bun test tests/ examples/full-demo/tests/"
   },
   "keywords": ["typescript", "framework", "orm", "decorators", "minimal"],
   "author": "",

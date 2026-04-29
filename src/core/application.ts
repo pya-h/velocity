@@ -36,6 +36,7 @@ const INJECTABLE_MAP: Record<string, string> = {
   param: 'params', params: 'params',
   query: 'query',
   cookie: 'cookies', cookies: 'cookies',
+  signedCookies: 'signedCookies', signedCookie: 'signedCookies',
   header: 'headers', headers: 'headers',
   file: 'files', files: 'files',
   user: 'user',
@@ -51,6 +52,7 @@ const ARG_BUILDER_MAP: Record<string, ArgBuilder> = {
   params:  (req) => req.params,
   query:   (req) => req.query,
   cookies: (req) => req.cookies,
+  signedCookies: (req) => req.signedCookies,
   headers: (req) => req.headers,
   files:   (req) => req.files,
   user:    (req) => req.user,
@@ -97,8 +99,37 @@ function _resSend(this: VelocityResponse, data: any) {
   }
 }
 
+// ─── Cookie signing (HMAC-SHA256) ────────────────────────────────────────────
+
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function _signValue(value: string, secret: string): string {
+  const sig = createHmac('sha256', secret).update(value).digest('base64url');
+  return `${value}.${sig}`;
+}
+
+function _unsignValue(signed: string, secret: string): string | false {
+  const dot = signed.lastIndexOf('.');
+  if (dot === -1) return false;
+  const value = signed.slice(0, dot);
+  const sig = signed.slice(dot + 1);
+  const expected = createHmac('sha256', secret).update(value).digest('base64url');
+  // Timing-safe comparison to prevent timing attacks
+  try {
+    if (sig.length !== expected.length) return false;
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  } catch { return false; }
+  return value;
+}
+
+// ─── Cookie helpers ──────────────────────────────────────────────────────────
+
+/** Bound to each VelocityResponse — captures `cookieSecret` from app config. */
+let _cookieSecret: string | undefined;
+
 function _resCookie(this: VelocityResponse, name: string, value: string, options?: CookieOptions) {
-  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+  const finalValue = (options?.signed && _cookieSecret) ? _signValue(value, _cookieSecret) : value;
+  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(finalValue)}`;
   if (options?.maxAge !== undefined) cookie += `; Max-Age=${options.maxAge}`;
   if (options?.expires) cookie += `; Expires=${options.expires.toUTCString()}`;
   if (options?.path) cookie += `; Path=${options.path}`;
@@ -114,6 +145,10 @@ function _resCookie(this: VelocityResponse, name: string, value: string, options
   return this;
 }
 
+function _resClearCookie(this: VelocityResponse, name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>) {
+  return this.setCookie(name, '', { ...options, maxAge: 0 });
+}
+
 function _parseCookies(header: string | undefined): Record<string, string> {
   if (!header) return {};
   const result: Record<string, string> = {};
@@ -123,6 +158,14 @@ function _parseCookies(header: string | undefined): Record<string, string> {
     const key = decodeURIComponent(pair.slice(0, eq).trim());
     const val = decodeURIComponent(pair.slice(eq + 1).trim());
     result[key] = val;
+  }
+  return result;
+}
+
+function _parseSignedCookies(raw: Record<string, string>, secret: string): Record<string, string | false> {
+  const result: Record<string, string | false> = {};
+  for (const [key, val] of Object.entries(raw)) {
+    result[key] = _unsignValue(val, secret);
   }
   return result;
 }
@@ -194,6 +237,7 @@ export class VelocityApplication {
     this.container = new Container();
     this.config = new Config(config);
     this.logger = new Logger(this.config.get('logger'));
+    _cookieSecret = config?.cookieSecret;
 
     // Only load node:http on Node.js — Bun uses Bun.serve() and never needs it
     this.server = IS_BUN ? null : require('http').createServer((req: IncomingMessage, res: ServerResponse) => this.handleRequest(req, res));
@@ -795,15 +839,28 @@ export class VelocityApplication {
       const method = req.method?.toUpperCase() || 'GET';
 
       // Cookie parsing — lazy, only allocates on first access
+      const rawCookieHeader = (req.headers.cookie ?? req.headers.Cookie) as string | undefined;
       Object.defineProperty(velocityReq, 'cookies', {
         get() {
-          const val = _parseCookies((req.headers.cookie ?? req.headers.Cookie) as string | undefined);
+          const val = _parseCookies(rawCookieHeader);
           Object.defineProperty(this, 'cookies', { value: val, writable: true, enumerable: true, configurable: true });
           return val;
         },
         enumerable: true,
         configurable: true,
       });
+      if (_cookieSecret) {
+        Object.defineProperty(velocityReq, 'signedCookies', {
+          get() {
+            const raw = _parseCookies(rawCookieHeader);
+            const val = _parseSignedCookies(raw, _cookieSecret!);
+            Object.defineProperty(this, 'signedCookies', { value: val, writable: true, enumerable: true, configurable: true });
+            return val;
+          },
+          enumerable: true,
+          configurable: true,
+        });
+      }
 
       if (this.corsPrecomputed) {
         const cors = this.corsPrecomputed;
@@ -873,6 +930,7 @@ export class VelocityApplication {
     velocityRes.status = _resStatus;
     velocityRes.send = _resSend;
     velocityRes.setCookie = _resCookie;
+    velocityRes.clearCookie = _resClearCookie;
     return velocityRes;
   }
 
@@ -1450,6 +1508,7 @@ export class VelocityApplication {
       status: _resStatus,
       send: _resSend,
       setCookie: _resCookie,
+      clearCookie: _resClearCookie,
     };
 
     const res = rawRes as unknown as VelocityResponse;

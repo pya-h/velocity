@@ -1,99 +1,110 @@
 import '../src/core/metadata';
-import { describe, test, expect } from 'bun:test';
+import { Suite, Test, expect } from '../src/testing/decorators';
 import { parseFunctionCall, parseFnArgs } from '../src/decorators/fn';
 
 // ─── parseFunctionCall ───────────────────────────────────────────────────────
 
-describe('@Fn — parseFunctionCall', () => {
-  test('bare name (no parens)', () => {
+@Suite('@Fn — parseFunctionCall')
+class ParseFunctionCallTests {
+  @Test('bare name (no parens)')
+  bareName() {
     expect(parseFunctionCall('/.greet')).toEqual({ name: 'greet', rawArgs: '' });
-  });
+  }
 
-  test('empty parens', () => {
+  @Test('empty parens')
+  emptyParens() {
     expect(parseFunctionCall('/.greet()')).toEqual({ name: 'greet', rawArgs: '' });
-  });
+  }
 
-  test('with arguments', () => {
+  @Test('with arguments')
+  withArgs() {
     expect(parseFunctionCall('/.add(1,2)')).toEqual({ name: 'add', rawArgs: '1,2' });
-  });
+  }
 
-  test('URL-encoded args are decoded', () => {
+  @Test('URL-encoded args are decoded')
+  urlEncoded() {
     const result = parseFunctionCall('/.greet(%22Alice%22)');
     expect(result?.rawArgs).toBe('"Alice"');
-  });
+  }
 
-  test('underscore and $ in name', () => {
+  @Test('underscore and $ in name')
+  specialChars() {
     expect(parseFunctionCall('/.$find_user()')?.name).toBe('$find_user');
-  });
+  }
 
-  test('regular route returns null', () => {
+  @Test('regular route returns null')
+  regularRoute() {
     expect(parseFunctionCall('/users')).toBeNull();
-  });
+  }
 
-  test('bare dot returns null (no name)', () => {
+  @Test('bare dot returns null (no name)')
+  bareDot() {
     expect(parseFunctionCall('/.')).toBeNull();
-  });
+  }
 
-  test('invalid encoding returns null', () => {
+  @Test('invalid encoding returns null')
+  invalidEncoding() {
     expect(parseFunctionCall('/.fn(%zz')).toBeNull();
-  });
+  }
 
-  test('name starts with digit returns null', () => {
+  @Test('name starts with digit returns null')
+  digitStart() {
     expect(parseFunctionCall('/.1fn()')).toBeNull();
-  });
-});
+  }
+}
 
 // ─── parseFnArgs ─────────────────────────────────────────────────────────────
 
-describe('@Fn — parseFnArgs', () => {
-  test('empty string → []', () =>
-    expect(parseFnArgs('')).toEqual([]));
+@Suite('@Fn — parseFnArgs')
+class ParseFnArgsTests {
+  @Test('empty string → []')
+  empty() { expect(parseFnArgs('')).toEqual([]); }
 
-  test('integer', () =>
-    expect(parseFnArgs('42')).toEqual([42]));
+  @Test('integer')
+  integer() { expect(parseFnArgs('42')).toEqual([42]); }
 
-  test('negative integer', () =>
-    expect(parseFnArgs('-7')).toEqual([-7]));
+  @Test('negative integer')
+  negInt() { expect(parseFnArgs('-7')).toEqual([-7]); }
 
-  test('float', () =>
-    expect(parseFnArgs('3.14')).toEqual([3.14]));
+  @Test('float')
+  float() { expect(parseFnArgs('3.14')).toEqual([3.14]); }
 
-  test('scientific notation', () =>
-    expect(parseFnArgs('1e3')).toEqual([1000]));
+  @Test('scientific notation')
+  scientific() { expect(parseFnArgs('1e3')).toEqual([1000]); }
 
-  test('true', () =>
-    expect(parseFnArgs('true')).toEqual([true]));
+  @Test('true')
+  boolTrue() { expect(parseFnArgs('true')).toEqual([true]); }
 
-  test('false', () =>
-    expect(parseFnArgs('false')).toEqual([false]));
+  @Test('false')
+  boolFalse() { expect(parseFnArgs('false')).toEqual([false]); }
 
-  test('null', () =>
-    expect(parseFnArgs('null')).toEqual([null]));
+  @Test('null')
+  nullVal() { expect(parseFnArgs('null')).toEqual([null]); }
 
-  test('undefined', () =>
-    expect(parseFnArgs('undefined')).toEqual([undefined]));
+  @Test('undefined')
+  undefinedVal() { expect(parseFnArgs('undefined')).toEqual([undefined]); }
 
-  test('double-quoted string', () =>
-    expect(parseFnArgs('"hello world"')).toEqual(['hello world']));
+  @Test('double-quoted string')
+  doubleQuoted() { expect(parseFnArgs('"hello world"')).toEqual(['hello world']); }
 
-  test('single-quoted string', () =>
-    expect(parseFnArgs("'hi there'")).toEqual(['hi there']));
+  @Test('single-quoted string')
+  singleQuoted() { expect(parseFnArgs("'hi there'")).toEqual(['hi there']); }
 
-  test('unquoted string', () =>
-    expect(parseFnArgs('alice')).toEqual(['alice']));
+  @Test('unquoted string')
+  unquoted() { expect(parseFnArgs('alice')).toEqual(['alice']); }
 
-  test('multiple args', () =>
-    expect(parseFnArgs('1,2,3')).toEqual([1, 2, 3]));
+  @Test('multiple args')
+  multiple() { expect(parseFnArgs('1,2,3')).toEqual([1, 2, 3]); }
 
-  test('mixed types', () =>
-    expect(parseFnArgs('"Alice",25,true,null')).toEqual(['Alice', 25, true, null]));
+  @Test('mixed types')
+  mixed() { expect(parseFnArgs('"Alice",25,true,null')).toEqual(['Alice', 25, true, null]); }
 
-  test('whitespace around args', () =>
-    expect(parseFnArgs('1, 2, 3')).toEqual([1, 2, 3]));
+  @Test('whitespace around args')
+  whitespace() { expect(parseFnArgs('1, 2, 3')).toEqual([1, 2, 3]); }
 
-  test('escape sequences in quoted string', () =>
-    expect(parseFnArgs('"line\\nbreak"')).toEqual(['line\nbreak']));
+  @Test('escape sequences in quoted string')
+  escape() { expect(parseFnArgs('"line\\nbreak"')).toEqual(['line\nbreak']); }
 
-  test('tab escape', () =>
-    expect(parseFnArgs('"col\\there"')).toEqual(['col\there']));
-});
+  @Test('tab escape')
+  tabEscape() { expect(parseFnArgs('"col\\there"')).toEqual(['col\there']); }
+}

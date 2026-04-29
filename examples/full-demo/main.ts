@@ -32,6 +32,13 @@
  *   curl localhost:5000/api/jobs/results   # completed jobs only
  *   curl localhost:5000/api/jobs/1         # specific job by ID
  *
+ * Cookie-based auth:
+ *   curl -X POST localhost:5000/api/auth/login \
+ *        -H "Content-Type: application/json" \
+ *        -d '{"username":"admin","password":"admin123"}' -c cookies.txt
+ *   curl localhost:5000/api/auth/me -b cookies.txt
+ *   curl -X POST localhost:5000/api/auth/logout -b cookies.txt -c cookies.txt
+ *
  * HTTP Functions (@Fn — /.name(args) syntax):
  *   curl 'localhost:5000/.findUser(1)'
  *   curl 'localhost:5000/.countUsers()'
@@ -58,6 +65,7 @@ import './src/services/job.service';
 
 // Controllers self-register on velo when imported
 import './src/controllers/health.controller';
+import './src/controllers/auth.controller';
 import './src/controllers/user.controller';
 import './src/controllers/post.controller';
 import './src/controllers/job.controller';

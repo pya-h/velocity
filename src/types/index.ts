@@ -8,6 +8,8 @@ export interface VelocityRequest extends IncomingMessage {
   user?: unknown;
   session?: unknown;
   cookies?: Record<string, string>;
+  /** Signed cookies — value is the verified plaintext, or `false` if signature invalid. */
+  signedCookies?: Record<string, string | false>;
   files?: Record<string, UploadedFile | UploadedFile[]>;
 }
 
@@ -16,6 +18,7 @@ export interface VelocityResponse extends ServerResponse {
   status(code: number): VelocityResponse;
   send(data: unknown): void;
   setCookie(name: string, value: string, options?: CookieOptions): VelocityResponse;
+  clearCookie(name: string, options?: Omit<CookieOptions, 'maxAge' | 'expires'>): VelocityResponse;
 }
 
 export interface RouteHandler {
@@ -44,6 +47,8 @@ export interface CookieOptions {
   secure?: boolean;
   httpOnly?: boolean;
   sameSite?: 'Strict' | 'Lax' | 'None';
+  /** Sign the cookie value with HMAC-SHA256 using the app's cookieSecret. */
+  signed?: boolean;
 }
 
 export interface UploadedFile {
@@ -107,6 +112,8 @@ export interface RegisterOptions {
 export interface ApplicationConfig {
   port: number;
   host: string;
+  /** Secret key for signing cookies (HMAC-SHA256). Required for `signed: true` in setCookie. */
+  cookieSecret?: string;
   logger?: LoggerConfig;
   cors?: {
     origin: string | string[];
