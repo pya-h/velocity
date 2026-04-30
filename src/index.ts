@@ -50,5 +50,5 @@ export type { EnvelocityOptions } from './config/envelocity';
 export { TestUtils } from './testing/test-utils';
 export { Suite, Test, BeforeEach, AfterEach, BeforeAll, AfterAll, Mock } from './testing/decorators';
 
-// Type exports (RegisterOptions, ApplicationConfig, etc.)
+// Type exports + header helper
 export * from './types';

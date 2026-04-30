@@ -1,11 +1,12 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import type { VeloSession } from '../core/session';
 
-export interface VeloRequest extends IncomingMessage {
+export interface VeloRequest extends Omit<IncomingMessage, 'headers'> {
   body?: unknown;
   params?: Record<string, string>;
   query?: Record<string, string>;
-  headers: Record<string, string | string[] | undefined>;
+  /** Node: Record with bracket access. Bun: native Headers — use .get('key') for cross-compat. */
+  headers: Record<string, string | string[] | undefined> | Headers;
   user?: unknown;
   session?: VeloSession;
   cookies?: Record<string, string>;
@@ -35,6 +36,12 @@ export interface InterceptorFunction {
 }
 
 export type GuardFunction = (req: VeloRequest) => boolean | Promise<boolean>;
+
+/** Read a header from either native Headers (.get) or plain object (bracket access). */
+export function getHeader(headers: VeloRequest['headers'], name: string): string | undefined {
+  if (typeof (headers as Headers).get === 'function') return (headers as Headers).get(name) ?? undefined;
+  return (headers as Record<string, string | string[] | undefined>)[name] as string | undefined;
+}
 
 export type OnRequestHook = (req: VeloRequest) => void | Promise<void>;
 export type OnResponseHook = (req: VeloRequest, res: VeloResponse) => void | Promise<void>;

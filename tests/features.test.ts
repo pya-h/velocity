@@ -23,6 +23,7 @@ import { Frame } from '../src/core/frame';
 import { Fn } from '../src/decorators/fn';
 import { TestUtils } from '../src/testing/test-utils';
 import * as Joi from 'joi';
+import { getHeader } from '../src/types';
 import type { VeloRequest, VeloResponse, GuardFunction } from '../src/types';
 
 // ─── Guards ─────────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ class GuardTests {
 
   @Test('guard checks header')
   async headerCheck() {
-    const authGuard: GuardFunction = (req) => !!req.headers['authorization'];
+    const authGuard: GuardFunction = (req) => !!getHeader(req.headers, 'authorization');
 
     @Controller('/g3')
     class C { @Get('/') @Guards(authGuard) get() { return 'protected'; } }
@@ -508,7 +509,7 @@ class FrameTests {
 
 describe('E2E — @Validate with guards + injection', () => {
   test('@Validate + @Guards + body injection work together', async () => {
-    const guard: GuardFunction = (req) => !!req.headers['authorization'];
+    const guard: GuardFunction = (req) => !!getHeader(req.headers, 'authorization');
 
     @Controller('/combo')
     class C {

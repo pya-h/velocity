@@ -1,4 +1,4 @@
-import { VeloRequest, VeloResponse } from '../types';
+import { VeloRequest, VeloResponse, getHeader } from '../types';
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -51,9 +51,9 @@ export class RateLimitMiddleware {
   }
 
   private getClientKey(req: VeloRequest): string {
-    return req.headers['x-forwarded-for'] as string || 
-           req.headers['x-real-ip'] as string ||
-           req.socket?.remoteAddress || 
+    return getHeader(req.headers, 'x-forwarded-for') ||
+           getHeader(req.headers, 'x-real-ip') ||
+           req.socket?.remoteAddress ||
            'unknown';
   }
 

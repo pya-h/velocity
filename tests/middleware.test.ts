@@ -8,7 +8,7 @@ import { Middlewares } from '../src/decorators/middleware';
 import { TestUtils } from '../src/testing/test-utils';
 import { CorsMiddleware } from '../src/middleware/cors';
 import { RateLimitMiddleware } from '../src/middleware/rate-limit';
-import { MiddlewareFunction, VeloRequest, VeloResponse } from '../src/types';
+import { MiddlewareFunction, VeloRequest, VeloResponse, getHeader } from '../src/types';
 
 // ─── Middleware chain ────────────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ describe('RateLimitMiddleware', () => {
     const rl = new RateLimitMiddleware({
       windowMs: 60_000,
       max: 1,
-      keyGenerator: (req) => (req.headers['x-user-id'] as string) || 'anon',
+      keyGenerator: (req) => (getHeader(req.headers, 'x-user-id')) || 'anon',
     });
 
     const reqA = TestUtils.createMockRequest({ headers: { 'x-user-id': 'user-1' } });

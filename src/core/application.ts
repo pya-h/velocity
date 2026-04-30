@@ -166,6 +166,23 @@ function _parseCookies(header: string | undefined): Record<string, string> {
   return result;
 }
 
+/** Read a header from either native Headers (.get) or plain object (bracket access). */
+function _getHeader(headers: any, name: string): string | undefined {
+  if (typeof headers.get === 'function') return headers.get(name) ?? undefined;
+  return headers[name] as string | undefined;
+}
+
+function _parseQuery(raw: string): Record<string, string> {
+  if (!raw) return {};
+  const result: Record<string, string> = {};
+  for (const pair of raw.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) { result[decodeURIComponent(pair)] = ''; continue; }
+    result[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+  }
+  return result;
+}
+
 function _parseSignedCookies(raw: Record<string, string>, secret: string): Record<string, string | false> {
   const result: Record<string, string | false> = {};
   for (const [key, val] of Object.entries(raw)) {
@@ -822,7 +839,7 @@ export class VeloApplication {
 
   // ─── Request handling ───
 
-  private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleRequest(req: IncomingMessage | VeloRequest, res: ServerResponse | VeloResponse): Promise<void> {
     // Track in-flight requests for graceful shutdown (Bun path tracks in bunFetchHandler)
     if (!(req as any).__bunSkipStatic) {
       this.activeRequests++;
@@ -833,18 +850,53 @@ export class VeloApplication {
     }
 
     const velocityReq = req as VeloRequest;
-    const velocityRes = this.enhanceResponse(res);
+    // Bun adapter already sets json/status/send/setCookie/clearCookie — skip enhanceResponse
+    const velocityRes = (req as any).__bunSkipStatic ? res as VeloResponse : this.enhanceResponse(res);
 
     try {
       // Lifecycle: onRequest hooks
       for (const hook of this._onRequest) await hook(velocityReq);
 
-      const url: URL = (req as any).__parsedUrl || new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-      const pathname = url.pathname;
+      // Fast path: Bun adapter pre-parses pathname via string scan (no new URL())
+      // Node path: parse URL once (unavoidable — Node gives us a relative URL string)
+      let pathname: string;
+      let rawQuery: string;
+      if ((req as any).__parsedPathname) {
+        pathname = (req as any).__parsedPathname;
+        rawQuery = (req as any).__bunRawQuery || '';
+      } else {
+        const url = new URL(req.url || '/', `http://${_getHeader(req.headers, 'host') || 'localhost'}`);
+        pathname = url.pathname;
+        rawQuery = url.search ? url.search.slice(1) : '';
+        (req as any).__parsedPathname = pathname;
+        (req as any).__bunRawQuery = rawQuery;
+      }
       const method = req.method?.toUpperCase() || 'GET';
 
-      // Cookie parsing — lazy, only allocates on first access
-      const rawCookieHeader = (req.headers.cookie ?? req.headers.Cookie) as string | undefined;
+      if (this.corsPrecomputed) {
+        const cors = this.corsPrecomputed;
+        for (const [k, v] of cors.fixedHeaders) res.setHeader(k, v);
+        if (cors.isArrayOrigin) {
+          const reqOrigin = _getHeader(req.headers, 'origin') || '';
+          res.setHeader('Access-Control-Allow-Origin', cors.originSet!.has(reqOrigin) ? reqOrigin : cors.singleOrigin);
+        }
+        if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      }
+
+      if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
+
+      // Lazy properties — only set up for routes that actually get dispatched
+      // (skipped for OPTIONS, static files, and early returns above)
+      const rawCookieHeader = _getHeader(req.headers, 'cookie');
+      Object.defineProperty(velocityReq, 'query', {
+        get() {
+          const val = _parseQuery(rawQuery);
+          Object.defineProperty(this, 'query', { value: val, writable: true, enumerable: true, configurable: true });
+          return val;
+        },
+        enumerable: true,
+        configurable: true,
+      });
       Object.defineProperty(velocityReq, 'cookies', {
         get() {
           const val = _parseCookies(rawCookieHeader);
@@ -879,29 +931,6 @@ export class VeloApplication {
           configurable: true,
         });
       }
-
-      if (this.corsPrecomputed) {
-        const cors = this.corsPrecomputed;
-        for (const [k, v] of cors.fixedHeaders) res.setHeader(k, v);
-        if (cors.isArrayOrigin) {
-          const reqOrigin = (req.headers.origin as string) || '';
-          res.setHeader('Access-Control-Allow-Origin', cors.originSet!.has(reqOrigin) ? reqOrigin : cors.singleOrigin);
-        }
-        if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      }
-
-      if (method === 'GET' && !(req as any).__bunSkipStatic && this.tryServeStatic(pathname, res)) return;
-
-      // Lazy query parsing — only allocates when handler accesses req.query
-      Object.defineProperty(velocityReq, 'query', {
-        get() {
-          const val = Object.fromEntries(url.searchParams);
-          Object.defineProperty(this, 'query', { value: val, writable: true, enumerable: true, configurable: true });
-          return val;
-        },
-        enumerable: true,
-        configurable: true,
-      });
 
       if (pathname.startsWith('/.')) {
         await this.dispatchFunction(pathname, velocityReq, velocityRes);
@@ -986,7 +1015,7 @@ export class VeloApplication {
       req.on('end', () => {
         try {
           const body = Buffer.concat(chunks).toString('utf-8');
-          const contentType = req.headers['content-type'] || '';
+          const contentType = _getHeader(req.headers, 'content-type') || '';
           if (contentType.includes('application/json')) {
             resolve(JSON.parse(body));
           } else {
@@ -1214,6 +1243,27 @@ export class VeloApplication {
       }
     };
 
+    // Fastest path: zero injections, no frame, no status override, no hooks, no anything
+    // This compiles to the absolute minimum: call → JSON.stringify → end
+    if (!guards && !middlewares && !interceptors && !parseBody && !validationSchema
+        && !hasArgs && !frame && !defaultStatus && onErrorHooks.length === 0) {
+      return async (_req, res) => {
+        try {
+          const result = controller[method]();
+          // Inline sendResult for zero overhead
+          const val = result instanceof Promise ? await result : result;
+          if (res.headersSent) return;
+          if (val !== undefined) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(val)); }
+          else { res.statusCode = 204; res.end(''); }
+        } catch (error) {
+          logger.error('Request handling error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Internal Server Error', message: error instanceof Error ? error.message : 'Unknown error' });
+          }
+        }
+      };
+    }
+
     // Fast path: no body, no guards, no middleware, no interceptors, no validation
     if (!guards && !middlewares && !interceptors && !parseBody && !validationSchema) {
       return async (req, res) => {
@@ -1377,8 +1427,13 @@ export class VeloApplication {
   // ─── Bun.serve() adapter ───
 
   private async bunFetchHandler(request: Request, server?: any): Promise<Response> {
-    const reqUrl = new URL(request.url);
-    const pathname = reqUrl.pathname;
+    // Fast pathname extraction — avoids new URL() per request
+    // request.url is always "http://host:port/path?query" on Bun
+    const rawUrl = request.url;
+    const pathStart = rawUrl.indexOf('/', rawUrl.indexOf('//') + 2); // skip "http://"
+    const qIdx = rawUrl.indexOf('?', pathStart);
+    const pathname = qIdx === -1 ? rawUrl.slice(pathStart) : rawUrl.slice(pathStart, qIdx);
+    const rawQuery = qIdx === -1 ? '' : rawUrl.slice(qIdx + 1);
 
     // WebSocket upgrade — must happen before activeRequests tracking
     if (server && this.wsGateways.has(pathname)) {
@@ -1395,7 +1450,7 @@ export class VeloApplication {
         if (staticResp) return staticResp;
       }
 
-      const { req, res, getResponse } = this.createBunReqRes(request, reqUrl);
+      const { req, res, getResponse } = this.createBunReqRes(request, pathname, rawQuery);
       await this.handleRequest(req, res);
       return getResponse();
     } finally {
@@ -1449,48 +1504,21 @@ export class VeloApplication {
 
   private createBunReqRes(
     request: Request,
-    url: URL,
+    pathname: string,
+    rawQuery: string,
   ): { req: VeloRequest; res: VeloResponse; getResponse: () => Response } {
-    // Lazy header access — fetch from native Headers on demand instead of copying all upfront
-    const nativeHeaders = request.headers;
-    const headersCache: Record<string, string | undefined> = {};
-    const headers = new Proxy(headersCache, {
-      get(cache, key: string | symbol) {
-        if (typeof key === 'symbol') return undefined;
-        if (key in cache) return cache[key];
-        const v = nativeHeaders.get(key);
-        const result = v ?? undefined;
-        cache[key] = result;
-        return result;
-      },
-      has(_, key: string | symbol) {
-        if (typeof key === 'symbol') return false;
-        return nativeHeaders.has(key as string);
-      },
-      ownKeys() {
-        const keys: string[] = [];
-        nativeHeaders.forEach((_, k) => keys.push(k));
-        return keys;
-      },
-      getOwnPropertyDescriptor(cache, key: string | symbol) {
-        if (typeof key === 'symbol') return undefined;
-        if (!(key in cache)) {
-          const v = nativeHeaders.get(key as string);
-          cache[key as string] = v ?? undefined;
-        }
-        return { value: cache[key as string], writable: true, enumerable: true, configurable: true };
-      },
-    });
-
+    // Bun path: native Headers directly on req (no Proxy) — use .get() to access
     const req: any = {
-      url: url.pathname + (url.search || ''),
+      url: rawQuery ? `${pathname}?${rawQuery}` : pathname,
       method: request.method,
-      headers,
+      headers: request.headers, // native Headers — access via .get('key')
       __bunNativeRequest: request,
       __bunSkipStatic: true,
-      __parsedUrl: url,
+      __parsedPathname: pathname,
+      __bunRawQuery: rawQuery,
     };
 
+    // Lightweight response builder — plain object, no Proxy, no event emitters
     let _status = 200;
     const _headers: Record<string, string> = {};
     let _body = '';
@@ -1520,7 +1548,6 @@ export class VeloApplication {
         if (data !== undefined && data !== '') _body = data;
         _sent = true;
       },
-      write() {},
       on()             { return rawRes; },
       once()           { return rawRes; },
       emit()           { return false; },
@@ -1538,10 +1565,8 @@ export class VeloApplication {
     const acceptEnc = request.headers.get('accept-encoding') || '';
 
     const getResponse = (): Response => {
-      // Response compression (gzip) — Bun path
       if (compress && _body && _body.length >= threshold && acceptEnc.includes('gzip')) {
         const ct = _headers['content-type'] || '';
-        // Only compress text-based responses
         if (ct.includes('json') || ct.includes('text') || ct.includes('javascript') || ct.includes('xml')) {
           const compressed = Bun.gzipSync(Buffer.from(_body));
           _headers['content-encoding'] = 'gzip';

@@ -1,4 +1,4 @@
-import { VeloRequest, VeloResponse } from '../types';
+import { VeloRequest, VeloResponse, getHeader } from '../types';
 
 export interface CorsOptions {
   origin?: string | string[] | ((origin: string) => boolean);
@@ -12,7 +12,7 @@ export class CorsMiddleware {
   constructor(private options: CorsOptions = {}) {}
 
   public use(req: VeloRequest, res: VeloResponse, next: () => void): void {
-    const origin = req.headers.origin as string;
+    const origin = getHeader(req.headers, 'origin') || '';
     const { 
       origin: allowedOrigin = '*',
       credentials = false,

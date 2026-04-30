@@ -17,8 +17,10 @@ import { TestUtils } from '../src/testing/test-utils';
 // VeloRequest is an interface (erased at runtime) and emitDecoratorMetadata
 // would try to reference it as a runtime value.
 
+import { getHeader } from '../src/types';
+
 const authGuard = (req: any, res: any, next: () => void) => {
-  if (req.headers['authorization']) next();
+  if (getHeader(req.headers, 'authorization')) next();
   else res.status(401).json({ error: 'Unauthorized' });
 };
 
